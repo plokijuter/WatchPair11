@@ -21,7 +21,7 @@ Inspire par [Legizmo](https://chariz.com/buy/legizmo-moonstone) (architecture He
 | Feature | Statut | Detail |
 |---|---|---|
 | **Messages (iMessage/SMS)** | Partiel | Les messages recus s'affichent sur la Watch. **Envoyer un message depuis la Watch ne fonctionne pas.** |
-| **Messenger** | Absent | L'app Messenger n'apparait pas sur la Watch. |
+| **Messenger** | Partiel | L'app Messenger n'apparait pas sur la Watch, mais la reception et la reponse aux messages fonctionnent via les notifications. |
 | **Health/Sante** | Non teste | Sync donnees sante potentiellement cassee (necessite injection nanoregistryd, pas possible sans boot loops). |
 | **Maps** | Non teste | Navigation Watch -> iPhone potentiellement cassee. |
 | **Music sync** | Non teste | Transfert de playlists vers la Watch non verifie. |
