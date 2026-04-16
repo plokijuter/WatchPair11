@@ -42,15 +42,23 @@ Les features manquantes (Messages sortants, Messenger) necessiteraient des hooks
 
 ## Installation
 
+### Via Sileo
+
+1. Telecharger le `.deb` depuis les [Releases](https://github.com/plokijuter/WatchPair11/releases)
+2. Ouvrir le fichier avec Sileo
+3. Installer
+
+### Via SSH
+
 ```bash
-# Build
-make package
-
-# Copier le .deb sur l'iPhone (via iproxy USB)
-scp -P 2222 packages/*.deb mobile@127.0.0.1:/tmp/
-
-# Installer
+scp -P 2222 *.deb mobile@127.0.0.1:/tmp/
 ssh -p 2222 mobile@127.0.0.1 "sudo dpkg -i /tmp/com.watchpair11.tweak_*.deb"
+```
+
+### Depuis les sources
+
+```bash
+make package
 ```
 
 Apres l'installation, **rejailbreak** (relancer nathanlr) pour que le loader soit actif.
