@@ -1,0 +1,18 @@
+# Build artifacts (Theos)
+.theos/
+packages/
+*.dSYM/
+*.o
+
+# Compiled binaries
+*.dylib
+*.deb
+bulletindistributord
+companionmessagesd
+
+# Reference/third-party binaries
+generalhook_original.dylib
+layout/
+
+# Local environment
+*.log

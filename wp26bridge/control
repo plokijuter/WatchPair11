@@ -1,0 +1,8 @@
+Package: com.wp26.bridge
+Name: WP26Bridge
+Version: 1.0
+Architecture: iphoneos-arm64
+Description: Alloy topic bridge for watchOS 11.5 on iOS 16
+Maintainer: plokijuter
+Author: plokijuter
+Section: Utilities

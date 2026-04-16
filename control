@@ -1,0 +1,9 @@
+Package: com.watchpair26.tweak
+Name: WatchPair26
+Version: 7.2
+Architecture: iphoneos-arm64
+Description: Permet le pairing d'une Apple Watch watchOS 26 avec iOS 16 (nathanlr). Bypass NanoRegistry + MobileAsset + CFPreferences flush.
+Maintainer: plokijuter
+Author: plokijuter
+Section: Tweaks
+Depends: mobilesubstrate (>= 0.9.5000), firmware (>= 15.0)

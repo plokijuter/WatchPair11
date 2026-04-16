@@ -1,0 +1,20 @@
+{
+	Filter = {
+		Executables = (
+			SpringBoard,
+			bluetoothd,
+			Bridge,
+			companionproxyd,
+			terminusd,
+			pairedsyncd,
+			nanoregistrylaunchd,
+			appconduitd,
+			installd,
+			identityservicesd,
+			apsd,
+			imagent,
+			nptocompaniond,
+			passd,
+		);
+	};
+}

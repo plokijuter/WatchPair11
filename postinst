@@ -1,0 +1,47 @@
+#!/bin/bash
+# WatchPair26 v6.0 - Post-installation (nathanlr)
+
+echo "[WP26] Post-install: installation du loader daemon..."
+
+# === INSTALLER LE LOADER ===
+ORIG="/var/jb/usr/lib/libTS2JailbreakEnv.dylib"
+BACKUP="/var/jb/usr/lib/libTS2JailbreakEnv_orig.dylib"
+LOADER="/var/jb/Library/MobileSubstrate/DynamicLibraries/WP26Loader.dylib"
+
+if [ -f "$ORIG" ]; then
+    # Backup de l'original (seulement si pas déjà fait)
+    if [ ! -f "$BACKUP" ]; then
+        echo "[WP26] Backup libTS2JailbreakEnv.dylib..."
+        cp "$ORIG" "$BACKUP"
+    fi
+
+    # Remplacer par notre loader
+    if [ -f "$LOADER" ]; then
+        echo "[WP26] Installation du loader..."
+        cp "$LOADER" "$ORIG"
+        ldid -S "$ORIG" 2>/dev/null
+        echo "[WP26] Loader installé!"
+    fi
+fi
+
+# === KILL DAEMONS ===
+echo "[WP26] Kill des daemons Watch..."
+killall -9 nanoregistryd 2>/dev/null || true
+killall -9 companionproxyd 2>/dev/null || true
+killall -9 nptocompaniond 2>/dev/null || true
+killall -9 terminusd 2>/dev/null || true
+killall -9 pairedsyncd 2>/dev/null || true
+killall -9 Bridge 2>/dev/null || true
+killall -9 passd 2>/dev/null || true
+killall -9 identityservicesd 2>/dev/null || true
+killall -9 imagent 2>/dev/null || true
+killall -9 apsd 2>/dev/null || true
+killall -9 appconduitd 2>/dev/null || true
+
+echo "[WP26] Daemons Watch redémarrés."
+echo "[WP26] ============================================"
+echo "[WP26] IMPORTANT: Vous devez REJAILBREAK (relancer"
+echo "[WP26] nathanlr) pour que le loader soit actif."
+echo "[WP26] Après rejailbreak, les daemons chargeront"
+echo "[WP26] le tweak automatiquement."
+echo "[WP26] ============================================"

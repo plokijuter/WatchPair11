@@ -1,0 +1,1698 @@
+#import <Foundation/Foundation.h>
+#import <objc/runtime.h>
+#import <objc/message.h>
+#import <spawn.h>
+#import <signal.h>
+#import <dlfcn.h>
+#import <sys/stat.h>
+#import <substrate.h>
+
+/*
+ * WatchPair26 v5 - watchOS 26 <-> iOS 16 (nathanlr)
+ *
+ * v4 bloquait l'unpair côté iPhone, mais la Watch reçoit la VRAIE
+ * version iOS (16.x) et se dé-jumèle de SON côté.
+ *
+ * v5 ajoute le SPOOFING DE VERSION iOS:
+ *   - Hook NSProcessInfo.operatingSystemVersion → 26.0.0
+ *   - Hook valueForProperty: pour SystemVersion/MarketingVersion → "26.0"
+ *   - Hook NRPairingCompatibilityVersionInfo.systemVersions
+ *   - Intercepte la lecture de SystemVersion.plist → ProductVersion spoofé
+ *   - Tout ce que v4 faisait déjà
+ */
+
+// Version iOS à spoofer (watchOS 11.5 attend iOS 18.x)
+// Watch = watchOS 11.5 (22T572), Watch6,10 — requires iOS 18+
+#define SPOOFED_IOS_MAJOR 18
+#define SPOOFED_IOS_MINOR 5
+#define SPOOFED_IOS_PATCH 0
+#define SPOOFED_IOS_VERSION_STRING @"18.5"
+
+#define MAX_COMPAT 99
+#define MIN_COMPAT 1
+
+// compatibilityState values (inversées depuis les headers NanoRegistry)
+// 0 = compatible, 1+ = incompatible
+#define COMPAT_STATE_COMPATIBLE 0
+
+extern void CFPreferencesSetValue(CFStringRef key, CFPropertyListRef value,
+                                  CFStringRef appID, CFStringRef user, CFStringRef host);
+extern Boolean CFPreferencesSynchronize(CFStringRef appID, CFStringRef user, CFStringRef host);
+
+// =====================================================================
+// LOGGING dans /var/mobile/Library/Preferences/wp26.log
+// Lisible avec Filza
+// =====================================================================
+#define WP26_LOG_PATH @"/var/tmp/wp26.log"
+
+static void wp26log(NSString *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    NSString *msg = [[NSString alloc] initWithFormat:fmt arguments:args];
+    va_end(args);
+
+    NSDateFormatter *df = [[NSDateFormatter alloc] init];
+    [df setDateFormat:@"HH:mm:ss.SSS"];
+    NSString *ts = [df stringFromDate:[NSDate date]];
+    NSString *proc = [[NSProcessInfo processInfo] processName];
+    NSString *line = [NSString stringWithFormat:@"[%@][%@] %@\n", ts, proc, msg];
+
+    NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:WP26_LOG_PATH];
+    if (!fh) {
+        [[NSFileManager defaultManager] createFileAtPath:WP26_LOG_PATH contents:nil attributes:nil];
+        fh = [NSFileHandle fileHandleForWritingAtPath:WP26_LOG_PATH];
+    }
+    [fh seekToEndOfFile];
+    [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+    [fh closeFile];
+
+}
+
+static void setPref(CFStringRef appID, CFStringRef key, CFPropertyListRef val) {
+    CFPreferencesSetValue(key, val, appID, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    CFPreferencesSetValue(key, val, appID, kCFPreferencesAnyUser, kCFPreferencesCurrentHost);
+}
+
+// =====================================================================
+// HOOKS: NRPairingCompatibilityVersionInfo (version checks)
+// =====================================================================
+static void hookNRVersionInfo(void) {
+    dlopen("/System/Library/PrivateFrameworks/NanoRegistry.framework/NanoRegistry", RTLD_LAZY);
+    Class cls = NSClassFromString(@"NRPairingCompatibilityVersionInfo");
+    if (!cls) return;
+
+    wp26log(@" Hook NRPairingCompatibilityVersionInfo");
+
+    NSArray *noArgSels = @[
+        @"maxPairingCompatibilityVersion",
+        @"minPairingCompatibilityVersion",
+        @"minPairingCompatibilityVersionWithChipID",
+        @"minQuickSwitchCompatibilityVersion",
+        @"pairingCompatibilityVersion"
+    ];
+    for (NSString *selName in noArgSels) {
+        SEL sel = NSSelectorFromString(selName);
+        if (![cls instancesRespondToSelector:sel]) continue;
+        Method m = class_getInstanceMethod(cls, sel);
+        if (!m) continue;
+        BOOL isMax = [selName hasPrefix:@"max"] || [selName isEqualToString:@"pairingCompatibilityVersion"];
+        long long val = isMax ? MAX_COMPAT : MIN_COMPAT;
+        class_replaceMethod(cls, sel,
+            imp_implementationWithBlock(^long long(id self) { return val; }),
+            method_getTypeEncoding(m));
+    }
+
+    SEL s1 = NSSelectorFromString(@"minPairingCompatibilityVersionForChipID:name:defaultVersion:");
+    if ([cls instancesRespondToSelector:s1]) {
+        Method m = class_getInstanceMethod(cls, s1);
+        if (m) class_replaceMethod(cls, s1,
+            imp_implementationWithBlock(^long long(id s, long long c, NSString *n, long long d) { return MIN_COMPAT; }),
+            method_getTypeEncoding(m));
+    }
+
+    SEL s2 = NSSelectorFromString(@"minPairingCompatibilityVersionForChipID:");
+    if ([cls instancesRespondToSelector:s2]) {
+        Method m = class_getInstanceMethod(cls, s2);
+        if (m) class_replaceMethod(cls, s2,
+            imp_implementationWithBlock(^long long(id s, long long c) { return MIN_COMPAT; }),
+            method_getTypeEncoding(m));
+    }
+
+    SEL s3 = NSSelectorFromString(@"minQuickSwitchPairingCompatibilityVersionForChipID:");
+    if ([cls instancesRespondToSelector:s3]) {
+        Method m = class_getInstanceMethod(cls, s3);
+        if (m) class_replaceMethod(cls, s3,
+            imp_implementationWithBlock(^long long(id s, long long c) { return MIN_COMPAT; }),
+            method_getTypeEncoding(m));
+    }
+
+    SEL s4 = NSSelectorFromString(@"isOverrideActive");
+    if ([cls instancesRespondToSelector:s4]) {
+        Method m = class_getInstanceMethod(cls, s4);
+        if (m) class_replaceMethod(cls, s4,
+            imp_implementationWithBlock(^BOOL(id s) { return YES; }),
+            method_getTypeEncoding(m));
+    }
+}
+
+// =====================================================================
+// HOOKS: IDSService - débloquer l'envoi de Messages depuis la Watch
+// Le service IDS com.apple.madrid a un MinCompatibilityVersion check
+// =====================================================================
+static void hookIDSService(void) {
+    // Charger IDS.framework
+    dlopen("/System/Library/PrivateFrameworks/IDS.framework/IDS", RTLD_LAZY);
+    dlopen("/System/Library/PrivateFrameworks/IDSFoundation.framework/IDSFoundation", RTLD_LAZY);
+
+    // Hook IDSService initWithServiceDictionary: pour forcer MinCompatibilityVersion bas
+    Class idsServiceClass = NSClassFromString(@"IDSService");
+    if (idsServiceClass) {
+        SEL initDictSel = NSSelectorFromString(@"initWithServiceDictionary:");
+        if ([idsServiceClass instancesRespondToSelector:initDictSel]) {
+            Method m = class_getInstanceMethod(idsServiceClass, initDictSel);
+            if (m) {
+                IMP origIMP = method_getImplementation(m);
+                typedef id (*OrigInitFunc)(id, SEL, NSDictionary*);
+
+                class_replaceMethod(idsServiceClass, initDictSel,
+                    imp_implementationWithBlock(^id(id self, NSDictionary *dict) {
+                        NSMutableDictionary *patched = [dict mutableCopy];
+                        // Forcer MinCompatibilityVersion à 1
+                        if (patched[@"MinCompatibilityVersion"]) {
+                            patched[@"MinCompatibilityVersion"] = @(1);
+                            wp26log(@"IDSService patched MinCompatibilityVersion -> 1");
+                        }
+                        return ((OrigInitFunc)origIMP)(self, initDictSel, patched);
+                    }),
+                    method_getTypeEncoding(m));
+                wp26log(@"Hooked IDSService initWithServiceDictionary:");
+            }
+        }
+
+        // Hook IDSService initWithServiceIdentifier: (variante)
+        SEL initIdSel = NSSelectorFromString(@"initWithServiceIdentifier:");
+        if ([idsServiceClass instancesRespondToSelector:initIdSel]) {
+            Method m = class_getInstanceMethod(idsServiceClass, initIdSel);
+            if (m) {
+                IMP origIMP = method_getImplementation(m);
+                typedef id (*OrigFunc)(id, SEL, NSString*);
+
+                class_replaceMethod(idsServiceClass, initIdSel,
+                    imp_implementationWithBlock(^id(id self, NSString *identifier) {
+                        wp26log(@"IDSService init avec identifier: %@", identifier);
+                        return ((OrigFunc)origIMP)(self, initIdSel, identifier);
+                    }),
+                    method_getTypeEncoding(m));
+            }
+        }
+    }
+
+    // Hook IDSServiceProperties pour supprimer les checks de version
+    Class idsPropsClass = NSClassFromString(@"IDSServiceProperties");
+    if (idsPropsClass) {
+        // minCompatibilityVersion -> 1
+        SEL minCompatSel = NSSelectorFromString(@"minCompatibilityVersion");
+        if ([idsPropsClass instancesRespondToSelector:minCompatSel]) {
+            Method m = class_getInstanceMethod(idsPropsClass, minCompatSel);
+            if (m) {
+                class_replaceMethod(idsPropsClass, minCompatSel,
+                    imp_implementationWithBlock(^long long(id self) { return 1; }),
+                    method_getTypeEncoding(m));
+                wp26log(@"Hooked IDSServiceProperties.minCompatibilityVersion -> 1");
+            }
+        }
+    }
+
+    // Hook IDSAccount - certains checks de compatibilité se font au niveau account
+    Class idsAccountClass = NSClassFromString(@"IDSAccount");
+    if (idsAccountClass) {
+        for (NSString *selName in @[@"isServiceAvailable", @"isActive", @"isEnabled"]) {
+            SEL sel = NSSelectorFromString(selName);
+            if ([idsAccountClass instancesRespondToSelector:sel]) {
+                Method m = class_getInstanceMethod(idsAccountClass, sel);
+                if (m) {
+                    class_replaceMethod(idsAccountClass, sel,
+                        imp_implementationWithBlock(^BOOL(id self) { return YES; }),
+                        method_getTypeEncoding(m));
+                }
+            }
+        }
+        wp26log(@"Hooked IDSAccount availability methods -> YES");
+    }
+}
+
+// =====================================================================
+// HOOKS: Spoofing de la version iOS envoyée à la Watch
+// =====================================================================
+static void hookVersionSpoofing(void) {
+    // 1. Hook NSProcessInfo.operatingSystemVersion
+    //    nanoregistryd utilise ça pour déterminer la version iOS
+    Class procInfoClass = [NSProcessInfo class];
+    SEL osVerSel = NSSelectorFromString(@"operatingSystemVersion");
+    if ([procInfoClass instancesRespondToSelector:osVerSel]) {
+        Method m = class_getInstanceMethod(procInfoClass, osVerSel);
+        if (m) {
+            class_replaceMethod(procInfoClass, osVerSel,
+                imp_implementationWithBlock(^NSOperatingSystemVersion(id self) {
+                    NSOperatingSystemVersion v;
+                    v.majorVersion = SPOOFED_IOS_MAJOR;
+                    v.minorVersion = SPOOFED_IOS_MINOR;
+                    v.patchVersion = SPOOFED_IOS_PATCH;
+                    return v;
+                }),
+                method_getTypeEncoding(m));
+            wp26log(@" Hooked operatingSystemVersion -> %d.%d.%d",
+                  SPOOFED_IOS_MAJOR, SPOOFED_IOS_MINOR, SPOOFED_IOS_PATCH);
+        }
+    }
+
+    // 2. Hook NSProcessInfo.operatingSystemVersionString
+    SEL osVerStrSel = NSSelectorFromString(@"operatingSystemVersionString");
+    if ([procInfoClass instancesRespondToSelector:osVerStrSel]) {
+        Method m = class_getInstanceMethod(procInfoClass, osVerStrSel);
+        if (m) {
+            class_replaceMethod(procInfoClass, osVerStrSel,
+                imp_implementationWithBlock(^NSString *(id self) {
+                    return [NSString stringWithFormat:@"Version %d.%d (Build 22F770)",
+                            SPOOFED_IOS_MAJOR, SPOOFED_IOS_MINOR];
+                }),
+                method_getTypeEncoding(m));
+            wp26log(@" Hooked operatingSystemVersionString");
+        }
+    }
+
+    // 3. Hook NSDictionary.dictionaryWithContentsOfFile: pour intercepter SystemVersion.plist
+    //    Quand nanoregistryd lit /System/Library/CoreServices/SystemVersion.plist,
+    //    on spoofe le ProductVersion
+    Method origDictMethod = class_getClassMethod([NSDictionary class],
+        @selector(dictionaryWithContentsOfFile:));
+    if (origDictMethod) {
+        IMP origIMP = method_getImplementation(origDictMethod);
+        typedef NSDictionary* (*OrigDictFunc)(id, SEL, NSString*);
+
+        class_replaceMethod(object_getClass([NSDictionary class]),
+            @selector(dictionaryWithContentsOfFile:),
+            imp_implementationWithBlock(^NSDictionary*(id self, NSString *path) {
+                NSDictionary *result = ((OrigDictFunc)origIMP)(self,
+                    @selector(dictionaryWithContentsOfFile:), path);
+                if (path && [path containsString:@"SystemVersion.plist"]) {
+                    NSMutableDictionary *spoofed = [result mutableCopy];
+                    spoofed[@"ProductVersion"] = SPOOFED_IOS_VERSION_STRING;
+                    spoofed[@"ProductBuildVersion"] = @"22F770";
+                    wp26log(@" Spoofed SystemVersion.plist ProductVersion -> %@",
+                          SPOOFED_IOS_VERSION_STRING);
+                    return [spoofed copy];
+                }
+                return result;
+            }),
+            method_getTypeEncoding(origDictMethod));
+        wp26log(@" Hooked dictionaryWithContentsOfFile: (SystemVersion.plist spoof)");
+    }
+}
+
+// =====================================================================
+// HOOKS: NRDevice / NRMutableDevice (post-pairing compatibility state)
+// =====================================================================
+static void hookNRDevice(void) {
+    // Hook NRDevice
+    Class deviceClass = NSClassFromString(@"NRDevice");
+    Class mutableClass = NSClassFromString(@"NRMutableDevice");
+
+    NSMutableArray *classes = [NSMutableArray array];
+    if (deviceClass) [classes addObject:deviceClass];
+    if (mutableClass) [classes addObject:mutableClass];
+
+    // Hook compatibilityState -> toujours 0 (compatible)
+    for (Class cls in classes) {
+
+        SEL compatSel = NSSelectorFromString(@"compatibilityState");
+        if ([cls instancesRespondToSelector:compatSel]) {
+            Method m = class_getInstanceMethod(cls, compatSel);
+            if (m) {
+                class_replaceMethod(cls, compatSel,
+                    imp_implementationWithBlock(^long long(id self) {
+                        return (long long)COMPAT_STATE_COMPATIBLE;
+                    }),
+                    method_getTypeEncoding(m));
+                wp26log(@" Hooked %@.compatibilityState -> COMPATIBLE", NSStringFromClass(cls));
+            }
+        }
+
+        // Hook isCompatible / isPairingCompatible si ça existe
+        for (NSString *selName in @[@"isCompatible", @"isPairingCompatible"]) {
+            SEL sel = NSSelectorFromString(selName);
+            if ([cls instancesRespondToSelector:sel]) {
+                Method m = class_getInstanceMethod(cls, sel);
+                if (m) {
+                    class_replaceMethod(cls, sel,
+                        imp_implementationWithBlock(^BOOL(id self) { return YES; }),
+                        method_getTypeEncoding(m));
+                    wp26log(@" Hooked %@.%@ -> YES", NSStringFromClass(cls), selName);
+                }
+            }
+        }
+    }
+
+    // Hook NRPairedDeviceRegistry methods
+    Class regClass = NSClassFromString(@"NRPairedDeviceRegistry");
+    if (regClass) {
+        // canCommunicateOnRegularServicesWithDevice: -> YES
+        SEL canCommSel = NSSelectorFromString(@"canCommunicateOnRegularServicesWithDevice:");
+        if ([regClass instancesRespondToSelector:canCommSel]) {
+            Method m = class_getInstanceMethod(regClass, canCommSel);
+            if (m) {
+                class_replaceMethod(regClass, canCommSel,
+                    imp_implementationWithBlock(^BOOL(id self, id device) { return YES; }),
+                    method_getTypeEncoding(m));
+                wp26log(@" Hooked canCommunicateOnRegularServicesWithDevice: -> YES");
+            }
+        }
+
+        // canCommunicateOnRegularServicesWithActiveWatch -> YES
+        SEL canCommActiveSel = NSSelectorFromString(@"canCommunicateOnRegularServicesWithActiveWatch");
+        if ([regClass instancesRespondToSelector:canCommActiveSel]) {
+            Method m = class_getInstanceMethod(regClass, canCommActiveSel);
+            if (m) {
+                class_replaceMethod(regClass, canCommActiveSel,
+                    imp_implementationWithBlock(^BOOL(id self) { return YES; }),
+                    method_getTypeEncoding(m));
+                wp26log(@" Hooked canCommunicateOnRegularServicesWithActiveWatch -> YES");
+            }
+        }
+    }
+
+    // Hook valueForProperty: sur NRDevice pour intercepter CompatibilityState
+    if (deviceClass) {
+        SEL valPropSel = NSSelectorFromString(@"valueForProperty:");
+        if ([deviceClass instancesRespondToSelector:valPropSel]) {
+            Method m = class_getInstanceMethod(deviceClass, valPropSel);
+            if (m) {
+                IMP origIMP = method_getImplementation(m);
+                typedef id (*OrigFunc)(id, SEL, id);
+
+                class_replaceMethod(deviceClass, valPropSel,
+                    imp_implementationWithBlock(^id(id self, id property) {
+                        id result = ((OrigFunc)origIMP)(self, valPropSel, property);
+                        // Si la propriété est CompatibilityState, retourner compatible
+                        if ([property isKindOfClass:[NSString class]]) {
+                            NSString *prop = (NSString *)property;
+                            if ([prop containsString:@"ompatibilityState"] ||
+                                [prop containsString:@"ompatibility"]) {
+                                return @(COMPAT_STATE_COMPATIBLE);
+                            }
+                            // Spoofer la version iOS rapportée via les propriétés NRDevice
+                            if ([prop containsString:@"SystemVersion"] ||
+                                [prop containsString:@"MarketingVersion"]) {
+                                wp26log(@" Spoofed NRDevice property %@ -> %@", prop, SPOOFED_IOS_VERSION_STRING);
+                                return SPOOFED_IOS_VERSION_STRING;
+                            }
+                            if ([prop containsString:@"MaxPairingCompatibilityVersion"]) {
+                                return @(MAX_COMPAT);
+                            }
+                        }
+                        return result;
+                    }),
+                    method_getTypeEncoding(m));
+                wp26log(@" Hooked NRDevice.valueForProperty: (intercepte CompatibilityState)");
+            }
+        }
+    }
+}
+
+// =====================================================================
+// HOOKS: Bloquer les notifications d'unpair forcé
+// =====================================================================
+static void hookUnpairPrevention(void) {
+    Class regClass = NSClassFromString(@"NRPairedDeviceRegistry");
+    if (!regClass) return;
+
+    // Hook retriggerUnpairInfoDialog -> NOP (C'EST ÇA qui cause le dé-jumelage)
+    for (NSString *selName in @[@"retriggerUnpairInfoDialog",
+                                 @"xpcRetriggerUnpairInfoDialogWithBlock:",
+                                 @"_triggerUnpairInfoDialog",
+                                 @"_retriggerUnpairInfoDialog",
+                                 @"triggerUnpairInfoDialogForDevice:",
+                                 @"showUnpairInfoDialog"]) {
+        SEL sel = NSSelectorFromString(selName);
+        if ([regClass instancesRespondToSelector:sel]) {
+            Method m = class_getInstanceMethod(regClass, sel);
+            if (m) {
+                unsigned int argCount = method_getNumberOfArguments(m);
+                if (argCount == 2) {
+                    class_replaceMethod(regClass, sel,
+                        imp_implementationWithBlock(^(id self) {
+                            wp26log(@" BLOQUÉ retriggerUnpairInfoDialog");
+                        }),
+                        method_getTypeEncoding(m));
+                } else if (argCount == 3) {
+                    class_replaceMethod(regClass, sel,
+                        imp_implementationWithBlock(^(id self, id arg1) {
+                            wp26log(@" BLOQUÉ %@", selName);
+                        }),
+                        method_getTypeEncoding(m));
+                }
+                wp26log(@" Installé bloqueur: %@", selName);
+            }
+        }
+    }
+
+    // Hook unpairDevice: / unpairAllDevices / obliterateDevice: -> NOP
+    for (NSString *selName in @[@"unpairDevice:", @"unpairAllDevices",
+                                 @"obliterateDevice:", @"unpairDevice:withOptions:"]) {
+        SEL sel = NSSelectorFromString(selName);
+        if ([regClass instancesRespondToSelector:sel]) {
+            Method m = class_getInstanceMethod(regClass, sel);
+            if (m) {
+                const char *encoding = method_getTypeEncoding(m);
+                // Compter les arguments pour savoir quelle block utiliser
+                unsigned int argCount = method_getNumberOfArguments(m);
+                if (argCount == 2) { // self + _cmd seulement
+                    class_replaceMethod(regClass, sel,
+                        imp_implementationWithBlock(^(id self) {
+                            wp26log(@" BLOQUÉ: %@ (unpair empêché)", selName);
+                        }),
+                        encoding);
+                } else if (argCount == 3) { // self + _cmd + 1 arg
+                    class_replaceMethod(regClass, sel,
+                        imp_implementationWithBlock(^(id self, id arg1) {
+                            wp26log(@" BLOQUÉ: %@ (unpair empêché)", selName);
+                        }),
+                        encoding);
+                } else if (argCount == 4) { // self + _cmd + 2 args
+                    class_replaceMethod(regClass, sel,
+                        imp_implementationWithBlock(^(id self, id arg1, id arg2) {
+                            wp26log(@" BLOQUÉ: %@ (unpair empêché)", selName);
+                        }),
+                        encoding);
+                }
+                wp26log(@" Installé bloqueur unpair: %@", selName);
+            }
+        }
+    }
+}
+
+// =====================================================================
+// HOOKS: PassKit / NanoPasses - Sync Apple Pay vers la Watch
+// =====================================================================
+static void hookPassKit(void) {
+    // Charger les frameworks PassKit
+    dlopen("/System/Library/PrivateFrameworks/PassKitCore.framework/PassKitCore", RTLD_LAZY);
+    dlopen("/System/Library/PrivateFrameworks/NanoPasses.framework/NanoPasses", RTLD_LAZY);
+
+    // === Hook PKDeviceCompatibility / PKPaymentDeviceCompatibility ===
+    // Ces classes vérifient la compatibilité du device pour Apple Pay
+    for (NSString *className in @[@"PKDeviceCompatibility",
+                                    @"PKPaymentDeviceCompatibility",
+                                    @"PKPaymentService"]) {
+        Class cls = NSClassFromString(className);
+        if (!cls) continue;
+
+        // Lister les méthodes qui contiennent "compatible", "supported", "available"
+        unsigned int methodCount = 0;
+        Method *methods = class_copyMethodList(object_getClass(cls), &methodCount);
+        for (unsigned int i = 0; i < methodCount; i++) {
+            NSString *selName = NSStringFromSelector(method_getName(methods[i]));
+            if ([selName containsString:@"isCompatible"] ||
+                [selName containsString:@"isSupported"] ||
+                [selName containsString:@"canProvision"] ||
+                [selName containsString:@"supportsPasses"]) {
+                wp26log(@"PassKit class method: +[%@ %@]", className, selName);
+            }
+        }
+        if (methods) free(methods);
+
+        // Méthodes d'instance aussi
+        methods = class_copyMethodList(cls, &methodCount);
+        for (unsigned int i = 0; i < methodCount; i++) {
+            NSString *selName = NSStringFromSelector(method_getName(methods[i]));
+            if ([selName containsString:@"isCompatible"] ||
+                [selName containsString:@"isSupported"] ||
+                [selName containsString:@"canProvision"] ||
+                [selName containsString:@"supportsPasses"]) {
+                wp26log(@"PassKit instance method: -[%@ %@]", className, selName);
+            }
+        }
+        if (methods) free(methods);
+    }
+
+    // === Hook PKRemotePaymentPassManager ===
+    // Gère le provisioning des cartes sur les devices distants (Watch)
+    Class remotePassMgr = NSClassFromString(@"PKRemotePaymentPassManager");
+    if (remotePassMgr) {
+        unsigned int methodCount = 0;
+        Method *methods = class_copyMethodList(remotePassMgr, &methodCount);
+        for (unsigned int i = 0; i < methodCount; i++) {
+            NSString *selName = NSStringFromSelector(method_getName(methods[i]));
+            // Log toutes les méthodes pour diagnostic
+            if ([selName containsString:@"compat"] ||
+                [selName containsString:@"version"] ||
+                [selName containsString:@"provision"] ||
+                [selName containsString:@"verify"] ||
+                [selName containsString:@"activate"] ||
+                [selName containsString:@"eligible"]) {
+                wp26log(@"PKRemotePaymentPassManager: %@", selName);
+            }
+        }
+        if (methods) free(methods);
+    }
+
+    // === Hook PKPassLibrary - vérifications de compatibilité Watch ===
+    Class passLibClass = NSClassFromString(@"PKPassLibrary");
+    if (passLibClass) {
+        // canAddPaymentPassForSecureElementIdentifier:... checks si on peut ajouter
+        // sur un SE distant (Watch). Force YES.
+        for (NSString *selName in @[@"canAddPaymentPassForSecureElementIdentifier:",
+                                     @"remoteSecureElementAvailable",
+                                     @"isPaymentPassActivationAvailable",
+                                     @"remotePaymentPassesAvailable",
+                                     @"remoteSecureElementIdentifiers"]) {
+            SEL sel = NSSelectorFromString(selName);
+            if ([passLibClass instancesRespondToSelector:sel]) {
+                Method m = class_getInstanceMethod(passLibClass, sel);
+                if (m) {
+                    // Vérifier le type de retour
+                    const char *retType = method_copyReturnType(m);
+                    if (retType && retType[0] == 'B') { // BOOL
+                        class_replaceMethod(passLibClass, sel,
+                            imp_implementationWithBlock(^BOOL(id self) {
+                                wp26log(@"PKPassLibrary.%@ -> YES (forced)", selName);
+                                return YES;
+                            }),
+                            method_getTypeEncoding(m));
+                        wp26log(@"Hooked PKPassLibrary.%@ -> YES", selName);
+                    }
+                    free((void*)retType);
+                }
+            }
+        }
+    }
+
+    // === Hook NPKCompanionAgentConnection / NanoPasses sync ===
+    // C'est le pont principal pour sync les passes vers la Watch
+    for (NSString *className in @[@"NPKCompanionAgentConnection",
+                                    @"NPKPassLibrary",
+                                    @"NPKCompanionPassManager"]) {
+        Class cls = NSClassFromString(className);
+        if (!cls) continue;
+
+        wp26log(@"NanoPasses: trouvé %@", className);
+
+        unsigned int methodCount = 0;
+        Method *methods = class_copyMethodList(cls, &methodCount);
+        for (unsigned int i = 0; i < methodCount; i++) {
+            NSString *selName = NSStringFromSelector(method_getName(methods[i]));
+            if ([selName containsString:@"compat"] ||
+                [selName containsString:@"version"] ||
+                [selName containsString:@"supported"] ||
+                [selName containsString:@"available"] ||
+                [selName containsString:@"eligible"] ||
+                [selName containsString:@"provision"] ||
+                [selName containsString:@"verify"] ||
+                [selName containsString:@"activate"]) {
+                wp26log(@"NanoPasses method: -[%@ %@]", className, selName);
+            }
+        }
+        if (methods) free(methods);
+    }
+
+    // === Hook PKPaymentWebServiceContext / PKPaymentVerificationController ===
+    // Gère la vérification des cartes et la propagation du statut
+    Class verifyCtrl = NSClassFromString(@"PKPaymentVerificationController");
+    if (verifyCtrl) {
+        unsigned int methodCount = 0;
+        Method *methods = class_copyMethodList(verifyCtrl, &methodCount);
+        for (unsigned int i = 0; i < methodCount; i++) {
+            NSString *selName = NSStringFromSelector(method_getName(methods[i]));
+            if ([selName containsString:@"complet"] ||
+                [selName containsString:@"verif"] ||
+                [selName containsString:@"pass"] ||
+                [selName containsString:@"device"]) {
+                wp26log(@"PKPaymentVerificationController: %@", selName);
+            }
+        }
+        if (methods) free(methods);
+    }
+
+    // === Hook PKSecureElementPass - statut d'activation ===
+    Class sePassClass = NSClassFromString(@"PKSecureElementPass");
+    if (sePassClass) {
+        // deviceAccountNumberSuffix, primaryAccountNumberSuffix existent
+        // On s'intéresse aux méthodes de provisioning state
+        for (NSString *selName in @[@"isProvisionedOnRemoteDevice",
+                                     @"provisioningState",
+                                     @"activationState"]) {
+            SEL sel = NSSelectorFromString(selName);
+            if ([sePassClass instancesRespondToSelector:sel]) {
+                wp26log(@"PKSecureElementPass has: %@", selName);
+            }
+        }
+    }
+
+    wp26log(@"PassKit hooks initialized");
+}
+
+// =====================================================================
+// HOOKS: Message Relay - Envoi de messages depuis la Watch
+// Le Watch envoie via IDS → imagent doit relayer (iMessage/SMS)
+// imagent refuse car il voit iOS 16 = "device incompatible"
+// =====================================================================
+static void hookMessageRelay(void) {
+    // Charger les frameworks iMessage
+    dlopen("/System/Library/PrivateFrameworks/IMFoundation.framework/IMFoundation", RTLD_LAZY);
+    dlopen("/System/Library/PrivateFrameworks/IMCore.framework/IMCore", RTLD_LAZY);
+    dlopen("/System/Library/PrivateFrameworks/IMDPersistence.framework/IMDPersistence", RTLD_LAZY);
+    dlopen("/System/Library/PrivateFrameworks/IMDaemonCore.framework/IMDaemonCore", RTLD_LAZY);
+    dlopen("/System/Library/PrivateFrameworks/IMTransferServices.framework/IMTransferServices", RTLD_LAZY);
+
+    // === 1. Hook IMService — le service iMessage/SMS vérifie la compatibilité ===
+    Class imServiceClass = NSClassFromString(@"IMService");
+    if (imServiceClass) {
+        // Scanner les méthodes pertinentes
+        unsigned int methodCount = 0;
+        Method *methods = class_copyMethodList(imServiceClass, &methodCount);
+        for (unsigned int i = 0; i < methodCount; i++) {
+            NSString *selName = NSStringFromSelector(method_getName(methods[i]));
+            if ([selName containsString:@"relay"] ||
+                [selName containsString:@"Relay"] ||
+                [selName containsString:@"canSend"] ||
+                [selName containsString:@"companion"] ||
+                [selName containsString:@"Companion"] ||
+                [selName containsString:@"remote"] ||
+                [selName containsString:@"Remote"] ||
+                [selName containsString:@"forward"] ||
+                [selName containsString:@"Forward"] ||
+                [selName containsString:@"compat"] ||
+                [selName containsString:@"supported"] ||
+                [selName containsString:@"available"] ||
+                [selName containsString:@"enabled"]) {
+                wp26log(@"IMService method: %@", selName);
+            }
+        }
+        if (methods) free(methods);
+    }
+
+    // === 2. Hook IMDService (daemon-side) ===
+    Class imdServiceClass = NSClassFromString(@"IMDService");
+    if (imdServiceClass) {
+        unsigned int methodCount = 0;
+        Method *methods = class_copyMethodList(imdServiceClass, &methodCount);
+        for (unsigned int i = 0; i < methodCount; i++) {
+            NSString *selName = NSStringFromSelector(method_getName(methods[i]));
+            if ([selName containsString:@"relay"] ||
+                [selName containsString:@"Relay"] ||
+                [selName containsString:@"canSend"] ||
+                [selName containsString:@"forward"] ||
+                [selName containsString:@"compat"] ||
+                [selName containsString:@"remote"] ||
+                [selName containsString:@"companion"]) {
+                wp26log(@"IMDService method: %@", selName);
+            }
+        }
+        if (methods) free(methods);
+    }
+
+    // === 3. Hook IMAccount — le compte iMessage/SMS vérifie si le relay est autorisé ===
+    Class imAccountClass = NSClassFromString(@"IMAccount");
+    if (imAccountClass) {
+        // Force les méthodes de relay/capabilities → YES
+        for (NSString *selName in @[@"allowsSMSRelay",
+                                     @"isSMSRelayCapable",
+                                     @"isSMSRelayEnabled",
+                                     @"allowsRelaying",
+                                     @"isRelayingEnabled",
+                                     @"isRelaySMSEnabled",
+                                     @"canRelaySMS",
+                                     @"supportsRemoteMessages",
+                                     @"isActive",
+                                     @"isEnabled",
+                                     @"isConnected",
+                                     @"isOperational"]) {
+            SEL sel = NSSelectorFromString(selName);
+            if ([imAccountClass instancesRespondToSelector:sel]) {
+                Method m = class_getInstanceMethod(imAccountClass, sel);
+                if (m) {
+                    class_replaceMethod(imAccountClass, sel,
+                        imp_implementationWithBlock(^BOOL(id self) {
+                            wp26log(@"IMAccount.%@ -> YES (forced)", selName);
+                            return YES;
+                        }),
+                        method_getTypeEncoding(m));
+                    wp26log(@"Hooked IMAccount.%@ -> YES", selName);
+                }
+            }
+        }
+
+        // Scanner d'autres méthodes relay
+        unsigned int methodCount = 0;
+        Method *methods = class_copyMethodList(imAccountClass, &methodCount);
+        for (unsigned int i = 0; i < methodCount; i++) {
+            NSString *selName = NSStringFromSelector(method_getName(methods[i]));
+            if ([selName containsString:@"relay"] ||
+                [selName containsString:@"Relay"]) {
+                wp26log(@"IMAccount relay method: %@", selName);
+            }
+        }
+        if (methods) free(methods);
+    }
+
+    // === 4. Hook IMDAccount (daemon-side account) ===
+    Class imdAccountClass = NSClassFromString(@"IMDAccount");
+    if (imdAccountClass) {
+        for (NSString *selName in @[@"allowsSMSRelay",
+                                     @"isSMSRelayCapable",
+                                     @"isSMSRelayEnabled",
+                                     @"allowsRelaying",
+                                     @"isRelayingEnabled",
+                                     @"canRelaySMS",
+                                     @"isActive",
+                                     @"isEnabled",
+                                     @"isConnected",
+                                     @"isOperational"]) {
+            SEL sel = NSSelectorFromString(selName);
+            if ([imdAccountClass instancesRespondToSelector:sel]) {
+                Method m = class_getInstanceMethod(imdAccountClass, sel);
+                if (m) {
+                    class_replaceMethod(imdAccountClass, sel,
+                        imp_implementationWithBlock(^BOOL(id self) {
+                            wp26log(@"IMDAccount.%@ -> YES (forced)", selName);
+                            return YES;
+                        }),
+                        method_getTypeEncoding(m));
+                    wp26log(@"Hooked IMDAccount.%@ -> YES", selName);
+                }
+            }
+        }
+    }
+
+    // === 5. Hook SMSRelay classes ===
+    for (NSString *className in @[@"IMSMSRelayController",
+                                    @"IMDSMSRelayController",
+                                    @"IMRelayController",
+                                    @"IMDRelayController",
+                                    @"IMRemoteDeviceRelayController"]) {
+        Class cls = NSClassFromString(className);
+        if (!cls) continue;
+        wp26log(@"Found relay class: %@", className);
+
+        unsigned int methodCount = 0;
+        Method *methods = class_copyMethodList(cls, &methodCount);
+        for (unsigned int i = 0; i < methodCount; i++) {
+            NSString *selName = NSStringFromSelector(method_getName(methods[i]));
+            wp26log(@"  -[%@ %@]", className, selName);
+
+            // Hook BOOL methods qui contiennent "can", "enabled", "supported", "available"
+            if ([selName hasPrefix:@"can"] ||
+                [selName hasPrefix:@"is"] ||
+                [selName hasPrefix:@"should"] ||
+                [selName containsString:@"enabled"] ||
+                [selName containsString:@"supported"] ||
+                [selName containsString:@"available"] ||
+                [selName containsString:@"capable"]) {
+                Method m = methods[i];
+                const char *retType = method_copyReturnType(m);
+                if (retType && retType[0] == 'B') {
+                    unsigned int argCount = method_getNumberOfArguments(m);
+                    if (argCount == 2) { // no args besides self+_cmd
+                        class_replaceMethod(cls, method_getName(m),
+                            imp_implementationWithBlock(^BOOL(id self) {
+                                wp26log(@"%@.%@ -> YES (forced)", className, selName);
+                                return YES;
+                            }),
+                            method_getTypeEncoding(m));
+                        wp26log(@"Hooked %@.%@ -> YES", className, selName);
+                    } else if (argCount == 3) {
+                        class_replaceMethod(cls, method_getName(m),
+                            imp_implementationWithBlock(^BOOL(id self, id arg1) {
+                                wp26log(@"%@.%@ -> YES (forced)", className, selName);
+                                return YES;
+                            }),
+                            method_getTypeEncoding(m));
+                        wp26log(@"Hooked %@.%@: -> YES", className, selName);
+                    }
+                }
+                if (retType) free((void*)retType);
+            }
+        }
+        if (methods) free(methods);
+    }
+
+    // === 6. Hook IMDMessageStore / IMMessage send path ===
+    // Quand la Watch envoie un message, il passe par IMDMessageStore
+    Class msgStoreClass = NSClassFromString(@"IMDMessageStore");
+    if (msgStoreClass) {
+        unsigned int methodCount = 0;
+        Method *methods = class_copyMethodList(msgStoreClass, &methodCount);
+        for (unsigned int i = 0; i < methodCount; i++) {
+            NSString *selName = NSStringFromSelector(method_getName(methods[i]));
+            if ([selName containsString:@"send"] ||
+                [selName containsString:@"Send"] ||
+                [selName containsString:@"relay"] ||
+                [selName containsString:@"Relay"] ||
+                [selName containsString:@"remote"] ||
+                [selName containsString:@"companion"]) {
+                wp26log(@"IMDMessageStore: %@", selName);
+            }
+        }
+        if (methods) free(methods);
+    }
+
+    // === 7. Hook CKSMSRelayAccount si disponible (ChatKit) ===
+    Class ckRelayClass = NSClassFromString(@"CKSMSRelayAccount");
+    if (ckRelayClass) {
+        wp26log(@"Found CKSMSRelayAccount");
+        for (NSString *selName in @[@"isRelayEnabled", @"canRelay", @"isEnabled"]) {
+            SEL sel = NSSelectorFromString(selName);
+            if ([ckRelayClass instancesRespondToSelector:sel]) {
+                Method m = class_getInstanceMethod(ckRelayClass, sel);
+                if (m) {
+                    class_replaceMethod(ckRelayClass, sel,
+                        imp_implementationWithBlock(^BOOL(id self) { return YES; }),
+                        method_getTypeEncoding(m));
+                    wp26log(@"Hooked CKSMSRelayAccount.%@ -> YES", selName);
+                }
+            }
+        }
+    }
+
+    // === 8. Hook IMRemoteDevice pour forcer la compatibilité Watch ===
+    for (NSString *className in @[@"IMRemoteDevice",
+                                    @"IMCompanionDevice",
+                                    @"IMNanoDevice",
+                                    @"IMDCompanionDevice"]) {
+        Class cls = NSClassFromString(className);
+        if (!cls) continue;
+        wp26log(@"Found device class: %@", className);
+
+        unsigned int methodCount = 0;
+        Method *methods = class_copyMethodList(cls, &methodCount);
+        for (unsigned int i = 0; i < methodCount; i++) {
+            NSString *selName = NSStringFromSelector(method_getName(methods[i]));
+            // Log toutes les méthodes pour diagnostic
+            wp26log(@"  -[%@ %@]", className, selName);
+
+            // Force BOOL methods pertinentes → YES
+            if ([selName containsString:@"compat"] ||
+                [selName containsString:@"support"] ||
+                [selName containsString:@"capable"] ||
+                [selName containsString:@"available"] ||
+                [selName containsString:@"enabled"] ||
+                [selName containsString:@"canSend"] ||
+                [selName containsString:@"canRelay"]) {
+                Method m = methods[i];
+                const char *retType = method_copyReturnType(m);
+                if (retType && retType[0] == 'B') {
+                    unsigned int argCount = method_getNumberOfArguments(m);
+                    if (argCount == 2) {
+                        class_replaceMethod(cls, method_getName(m),
+                            imp_implementationWithBlock(^BOOL(id self) {
+                                wp26log(@"%@.%@ -> YES (forced)", className, selName);
+                                return YES;
+                            }),
+                            method_getTypeEncoding(m));
+                    }
+                }
+                if (retType) free((void*)retType);
+            }
+        }
+        if (methods) free(methods);
+    }
+
+    wp26log(@"Message relay hooks initialized");
+}
+
+// =====================================================================
+// LOGGER: Liste toutes les méthodes unpair-related (sans les bloquer)
+// =====================================================================
+static void logUnpairMethods(void) {
+    Class regClass = NSClassFromString(@"NRPairedDeviceRegistry");
+    if (!regClass) return;
+
+    unsigned int methodCount = 0;
+    Method *methods = class_copyMethodList(regClass, &methodCount);
+    wp26log(@"NRPairedDeviceRegistry a %u méthodes", methodCount);
+    for (unsigned int i = 0; i < methodCount; i++) {
+        NSString *selName = NSStringFromSelector(method_getName(methods[i]));
+        if ([selName containsString:@"npair"] ||
+            [selName containsString:@"etrigger"] ||
+            [selName containsString:@"bliter"]) {
+            wp26log(@"  Méthode trouvée: %@", selName);
+        }
+    }
+    free(methods);
+}
+
+// =====================================================================
+// LOGGER v6.1: Diagnostic dump pour BLE proximity classes
+// Liste les méthodes des classes impliquées dans le pairing/proximity
+// pour identifier les hook targets pour le fix drain batterie
+// =====================================================================
+static void dumpClassMethods(NSString *className, NSArray<NSString *> *patterns) {
+    Class cls = NSClassFromString(className);
+    if (!cls) {
+        wp26log(@"  [DUMP] %@ NOT loaded", className);
+        return;
+    }
+
+    unsigned int instCount = 0, classCount = 0;
+    Method *instMethods = class_copyMethodList(cls, &instCount);
+    Method *classMethods = class_copyMethodList(object_getClass(cls), &classCount);
+    wp26log(@"  [DUMP] === %@ (%u inst + %u class) ===", className, instCount, classCount);
+
+    int matched = 0;
+    for (unsigned int i = 0; i < instCount; i++) {
+        NSString *sel = NSStringFromSelector(method_getName(instMethods[i]));
+        BOOL show = (patterns.count == 0);
+        for (NSString *p in patterns) {
+            if ([sel rangeOfString:p options:NSCaseInsensitiveSearch].location != NSNotFound) { show = YES; break; }
+        }
+        if (show) { wp26log(@"  [DUMP]   -%@", sel); matched++; }
+    }
+    for (unsigned int i = 0; i < classCount; i++) {
+        NSString *sel = NSStringFromSelector(method_getName(classMethods[i]));
+        BOOL show = (patterns.count == 0);
+        for (NSString *p in patterns) {
+            if ([sel rangeOfString:p options:NSCaseInsensitiveSearch].location != NSNotFound) { show = YES; break; }
+        }
+        if (show) { wp26log(@"  [DUMP]   +%@", sel); matched++; }
+    }
+    wp26log(@"  [DUMP]   (%d matched)", matched);
+    if (instMethods) free(instMethods);
+    if (classMethods) free(classMethods);
+}
+
+// =====================================================================
+// HOOKS v6.2-v6.3: Logging + discrimination + transformation BLE parsers
+// =====================================================================
+static IMP s_orig_setBleAdvertisementData = NULL;
+static IMP s_orig_parseNearbyActionV2 = NULL;
+static IMP s_orig_parseNearbyAction = NULL;
+static IMP s_orig_setNearbyActionV2Type = NULL;
+static IMP s_orig_setNearbyActionType = NULL;
+static IMP s_orig_setNearbyActionAuthTag = NULL;
+static IMP s_orig_setNearbyActionV2Flags = NULL;
+static IMP s_orig_setNearbyActionV2TargetData = NULL;
+static IMP s_orig_setLeAdvName = NULL;
+static IMP s_orig_setNearbyActionDeviceClass = NULL;
+
+// Throttle: limit log spam, only log first N occurrences per second
+static int s_logCounter = 0;
+static NSTimeInterval s_lastLogReset = 0;
+#define MAX_LOG_PER_SEC 30
+static BOOL shouldLog(void) {
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    if (now - s_lastLogReset >= 1.0) {
+        s_lastLogReset = now;
+        s_logCounter = 0;
+    }
+    if (s_logCounter < MAX_LOG_PER_SEC) { s_logCounter++; return YES; }
+    return NO;
+}
+
+// Try to extract a useful device identifier from a CBDevice instance
+static NSString *deviceTag(id self) {
+    @try {
+        SEL selAddr = @selector(deviceAddress);
+        SEL selName = @selector(leAdvName);
+        SEL selClass = @selector(nearbyActionDeviceClass);
+        NSString *addr = nil, *name = nil;
+        if ([self respondsToSelector:selAddr]) {
+            id a = ((id(*)(id, SEL))objc_msgSend)(self, selAddr);
+            if (a) addr = [a description];
+        }
+        if ([self respondsToSelector:selName]) {
+            id n = ((id(*)(id, SEL))objc_msgSend)(self, selName);
+            if (n) name = [n description];
+        }
+        uint8_t devClass = 0;
+        if ([self respondsToSelector:selClass]) {
+            devClass = ((uint8_t(*)(id, SEL))objc_msgSend)(self, selClass);
+        }
+        return [NSString stringWithFormat:@"<%@ name=%@ devClass=0x%02x>",
+                addr ?: @"?", name ?: @"?", devClass];
+    } @catch (NSException *e) {
+        return @"<err>";
+    }
+}
+
+// Helper: format NSData as hex for logging
+static NSString *hexDump(NSData *d, NSUInteger maxBytes) {
+    if (!d || d.length == 0) return @"<empty>";
+    NSUInteger n = MIN(d.length, maxBytes);
+    NSMutableString *s = [NSMutableString stringWithCapacity:n*3];
+    const uint8_t *b = (const uint8_t *)d.bytes;
+    for (NSUInteger i = 0; i < n; i++) [s appendFormat:@"%02x", b[i]];
+    if (d.length > maxBytes) [s appendFormat:@"..(%lu)", (unsigned long)d.length];
+    return s;
+}
+
+// Hook: -[CBDevice setBleAdvertisementData:] — entry point for raw adv bytes
+static void hooked_setBleAdvertisementData(id self, SEL _cmd, NSData *data) {
+    @try {
+        wp26log(@"[BLE] setBleAdvertisementData: len=%lu hex=%@",
+                (unsigned long)(data ? data.length : 0), hexDump(data, 80));
+    } @catch (NSException *e) {}
+    if (s_orig_setBleAdvertisementData) {
+        ((void(*)(id, SEL, NSData *))s_orig_setBleAdvertisementData)(self, _cmd, data);
+    }
+}
+
+// Hook: -[CBDevice _parseNearbyActionV2Ptr:end:] — V2 parser entry
+// Signature: takes raw byte pointers, no NSData
+static void hooked_parseNearbyActionV2(id self, SEL _cmd, const uint8_t *ptr, const uint8_t *end) {
+    if (ptr && end && end > ptr) {
+        NSUInteger len = MIN((NSUInteger)(end - ptr), (NSUInteger)64);
+        NSData *d = [NSData dataWithBytes:ptr length:len];
+        wp26log(@"[BLE] _parseNearbyActionV2 len=%ld hex=%@", (long)(end - ptr), hexDump(d, 64));
+    }
+    if (s_orig_parseNearbyActionV2) {
+        ((void(*)(id, SEL, const uint8_t *, const uint8_t *))s_orig_parseNearbyActionV2)(self, _cmd, ptr, end);
+    }
+}
+
+// Hook: -[CBDevice _parseNearbyActionPtr:end:] — V1 parser entry
+static void hooked_parseNearbyAction(id self, SEL _cmd, const uint8_t *ptr, const uint8_t *end) {
+    if (ptr && end && end > ptr) {
+        NSUInteger len = MIN((NSUInteger)(end - ptr), (NSUInteger)64);
+        NSData *d = [NSData dataWithBytes:ptr length:len];
+        wp26log(@"[BLE] _parseNearbyAction(V1) len=%ld hex=%@", (long)(end - ptr), hexDump(d, 64));
+    }
+    if (s_orig_parseNearbyAction) {
+        ((void(*)(id, SEL, const uint8_t *, const uint8_t *))s_orig_parseNearbyAction)(self, _cmd, ptr, end);
+    }
+}
+
+// v6.4: revenir à logging pur, snapshot complet du CBDevice quand un setter trigger
+static NSString *snapshotDevice(id self) {
+    @try {
+        #define READ_U8(name) ({ \
+            SEL _s = @selector(name); \
+            uint8_t _v = 0; \
+            if ([self respondsToSelector:_s]) _v = ((uint8_t(*)(id, SEL))objc_msgSend)(self, _s); \
+            _v; })
+        #define READ_OBJ(name) ({ \
+            SEL _s = @selector(name); \
+            id _v = nil; \
+            if ([self respondsToSelector:_s]) _v = ((id(*)(id, SEL))objc_msgSend)(self, _s); \
+            _v; })
+
+        uint8_t nat = READ_U8(nearbyActionType);
+        uint8_t nav2t = READ_U8(nearbyActionV2Type);
+        uint8_t nav2f = READ_U8(nearbyActionV2Flags);
+        uint8_t nadc = READ_U8(nearbyActionDeviceClass);
+        uint8_t naf = READ_U8(nearbyActionFlags);
+        uint8_t nif = READ_U8(nearbyInfoFlags);
+        NSData *advData = READ_OBJ(bleAdvertisementData);
+        NSString *advName = READ_OBJ(leAdvName);
+        NSData *authTag = READ_OBJ(nearbyActionAuthTag);
+        NSData *naV2tgt = READ_OBJ(nearbyActionV2TargetData);
+
+        return [NSString stringWithFormat:@"naT=0x%02x naV2T=0x%02x naV2F=0x%02x dc=0x%02x naF=0x%02x niF=0x%02x adv=%@ name=%@ auth=%@ tgt=%@",
+                nat, nav2t, nav2f, nadc, naf, nif,
+                hexDump(advData, 32), advName ?: @"-",
+                hexDump(authTag, 8), hexDump(naV2tgt, 16)];
+        #undef READ_U8
+        #undef READ_OBJ
+    } @catch (NSException *e) {
+        return @"<snap-err>";
+    }
+}
+
+static int s_btTraceCount = 0;
+static void hooked_setNearbyActionV2Type(id self, SEL _cmd, uint8_t type) {
+    if (shouldLog()) {
+        wp26log(@"[BLE] setNearbyActionV2Type: 0x%02x SNAP[%@]", type, snapshotDevice(self));
+    }
+    // v6.8: dump backtrace the first 3 times to identify the CALLER
+    if (s_btTraceCount < 3) {
+        s_btTraceCount++;
+        NSArray *bt = [NSThread callStackSymbols];
+        wp26log(@"[BLE] === BACKTRACE setNearbyActionV2Type (call #%d) ===", s_btTraceCount);
+        for (NSUInteger i = 0; i < MIN(bt.count, (NSUInteger)15); i++) {
+            wp26log(@"[BLE]   %@", bt[i]);
+        }
+    }
+    // v6.8: si type == 0x00 (parsing raté du watchOS 26 adv 0x14),
+    // ne PAS propager au CBDevice — laisse la valeur précédente en place
+    // plutôt que d'écraser avec 0x00 "unknown"
+    if (type == 0x00) {
+        if (s_btTraceCount <= 3) {
+            wp26log(@"[BLE] BLOCKED setNearbyActionV2Type:0x00 (would set unknown)");
+        }
+        return;  // skip the original setter — don't overwrite with 0x00
+    }
+    if (s_orig_setNearbyActionV2Type) {
+        ((void(*)(id, SEL, uint8_t))s_orig_setNearbyActionV2Type)(self, _cmd, type);
+    }
+}
+
+static void hooked_setNearbyActionType(id self, SEL _cmd, uint8_t type) {
+    if (shouldLog()) wp26log(@"[BLE] setNearbyActionType: 0x%02x %@", type, deviceTag(self));
+    if (s_orig_setNearbyActionType) {
+        ((void(*)(id, SEL, uint8_t))s_orig_setNearbyActionType)(self, _cmd, type);
+    }
+}
+
+static void hooked_setNearbyActionAuthTag(id self, SEL _cmd, NSData *data) {
+    if (shouldLog()) wp26log(@"[BLE] setNearbyActionAuthTag: %@ %@", hexDump(data, 16), deviceTag(self));
+    if (s_orig_setNearbyActionAuthTag) {
+        ((void(*)(id, SEL, NSData *))s_orig_setNearbyActionAuthTag)(self, _cmd, data);
+    }
+}
+
+static void hooked_setNearbyActionV2Flags(id self, SEL _cmd, uint8_t flags) {
+    if (shouldLog()) wp26log(@"[BLE] setNearbyActionV2Flags: 0x%02x %@", flags, deviceTag(self));
+    if (s_orig_setNearbyActionV2Flags) {
+        ((void(*)(id, SEL, uint8_t))s_orig_setNearbyActionV2Flags)(self, _cmd, flags);
+    }
+}
+
+static void hooked_setNearbyActionV2TargetData(id self, SEL _cmd, NSData *data) {
+    if (shouldLog()) wp26log(@"[BLE] setNearbyActionV2TargetData: %@", hexDump(data, 32));
+    if (s_orig_setNearbyActionV2TargetData) {
+        ((void(*)(id, SEL, NSData *))s_orig_setNearbyActionV2TargetData)(self, _cmd, data);
+    }
+}
+
+static void hooked_setLeAdvName(id self, SEL _cmd, NSString *name) {
+    if (shouldLog() && name) wp26log(@"[BLE] setLeAdvName: '%@'", name);
+    if (s_orig_setLeAdvName) {
+        ((void(*)(id, SEL, NSString *))s_orig_setLeAdvName)(self, _cmd, name);
+    }
+}
+
+static void hooked_setNearbyActionDeviceClass(id self, SEL _cmd, uint8_t cls) {
+    if (shouldLog()) wp26log(@"[BLE] setNearbyActionDeviceClass: 0x%02x %@", cls, deviceTag(self));
+    if (s_orig_setNearbyActionDeviceClass) {
+        ((void(*)(id, SEL, uint8_t))s_orig_setNearbyActionDeviceClass)(self, _cmd, cls);
+    }
+}
+
+// =====================================================================
+// v6.5 — résolution + hook des fonctions C parser BLE adv via MSFindSymbol
+// =====================================================================
+static void probeCSymbols(void) {
+    wp26log(@"==== C symbol probe v6.5 ====");
+
+    // Try to load CoreBluetooth.framework
+    void *cbHandle = dlopen("/System/Library/Frameworks/CoreBluetooth.framework/CoreBluetooth", RTLD_LAZY);
+    wp26log(@"[SYM] dlopen CoreBluetooth = %p", cbHandle);
+    void *btHandle = dlopen("/usr/sbin/bluetoothd", RTLD_LAZY);
+    wp26log(@"[SYM] dlopen bluetoothd = %p", btHandle);
+
+    // Symbols to try
+    const char *names[] = {
+        "_parseNearbyActionPtr",
+        "parseNearbyActionPtr",
+        "_parseNearbyActionV2Ptr",
+        "parseNearbyActionV2Ptr",
+        "_parseNearbyInfoPtr",
+        "_parseNearbyInfoV2Ptr",
+        "_parseProximityPairingPtr",
+        "_parseProximityPairingWxSetupPtr",
+        "_parseProximityPairingWxStatusPtr",
+        "_nearbyParseNearbyActionPtr",
+        "_parseAppleNearbyActionPtr",
+        "_parseAppleProximityPairingPtr",
+        NULL
+    };
+
+    // Probe via dlsym (RTLD_DEFAULT) and dladdr to identify origin
+    for (int i = 0; names[i]; i++) {
+        void *p = dlsym(RTLD_DEFAULT, names[i]);
+        if (!p && names[i][0] == '_') p = dlsym(RTLD_DEFAULT, names[i] + 1);
+        if (p) {
+            Dl_info info;
+            int rc = dladdr(p, &info);
+            wp26log(@"[SYM] %-40s = %p (%s)", names[i], p,
+                    rc ? (info.dli_fname ?: "?") : "<dladdr fail>");
+        } else {
+            // Try MSFindSymbol with explicit image
+            MSImageRef img = MSGetImageByName("/System/Library/Frameworks/CoreBluetooth.framework/CoreBluetooth");
+            if (img) {
+                void *q = MSFindSymbol(img, names[i]);
+                if (q) {
+                    wp26log(@"[SYM] %-40s = %p (CoreBluetooth via MSFindSymbol)", names[i], q);
+                    continue;
+                }
+            }
+            img = MSGetImageByName("/usr/sbin/bluetoothd");
+            if (img) {
+                void *q = MSFindSymbol(img, names[i]);
+                if (q) {
+                    wp26log(@"[SYM] %-40s = %p (bluetoothd via MSFindSymbol)", names[i], q);
+                    continue;
+                }
+            }
+            wp26log(@"[SYM] %-40s = NOT FOUND", names[i]);
+        }
+    }
+    wp26log(@"==== C symbol probe end ====");
+}
+
+// v6.4: enumerate all subclasses of CBDevice
+static void enumerateCBDeviceSubclasses(void) {
+    Class root = NSClassFromString(@"CBDevice");
+    if (!root) return;
+    int n = objc_getClassList(NULL, 0);
+    if (n <= 0 || n > 50000) return;
+    Class *list = (Class *)malloc(sizeof(Class) * n);
+    objc_getClassList(list, n);
+    int found = 0;
+    for (int i = 0; i < n; i++) {
+        Class c = list[i];
+        Class super = class_getSuperclass(c);
+        while (super) {
+            if (super == root) {
+                wp26log(@"[BLE] Subclass of CBDevice: %s", class_getName(c));
+                found++;
+                break;
+            }
+            super = class_getSuperclass(super);
+        }
+    }
+    wp26log(@"[BLE] (%d subclasses of CBDevice)", found);
+    free(list);
+}
+
+static void hookCBDeviceParsers(void) {
+    Class cls = NSClassFromString(@"CBDevice");
+    if (!cls) {
+        wp26log(@"[BLE] CBDevice NOT loaded — cannot hook parsers");
+        return;
+    }
+    enumerateCBDeviceSubclasses();
+    probeCSymbols();
+    wp26log(@"[BLE] Installing CBDevice parser hooks");
+
+    // setBleAdvertisementData:
+    {
+        SEL sel = @selector(setBleAdvertisementData:);
+        Method m = class_getInstanceMethod(cls, sel);
+        if (m) {
+            s_orig_setBleAdvertisementData = method_getImplementation(m);
+            method_setImplementation(m, (IMP)hooked_setBleAdvertisementData);
+            wp26log(@"[BLE]   hooked setBleAdvertisementData:");
+        }
+    }
+    // _parseNearbyActionV2Ptr:end:
+    {
+        SEL sel = NSSelectorFromString(@"_parseNearbyActionV2Ptr:end:");
+        Method m = class_getInstanceMethod(cls, sel);
+        if (m) {
+            s_orig_parseNearbyActionV2 = method_getImplementation(m);
+            method_setImplementation(m, (IMP)hooked_parseNearbyActionV2);
+            wp26log(@"[BLE]   hooked _parseNearbyActionV2Ptr:end:");
+        }
+    }
+    // _parseNearbyActionPtr:end:
+    {
+        SEL sel = NSSelectorFromString(@"_parseNearbyActionPtr:end:");
+        Method m = class_getInstanceMethod(cls, sel);
+        if (m) {
+            s_orig_parseNearbyAction = method_getImplementation(m);
+            method_setImplementation(m, (IMP)hooked_parseNearbyAction);
+            wp26log(@"[BLE]   hooked _parseNearbyActionPtr:end:");
+        }
+    }
+    // setNearbyActionV2Type:
+    {
+        SEL sel = @selector(setNearbyActionV2Type:);
+        Method m = class_getInstanceMethod(cls, sel);
+        if (m) {
+            s_orig_setNearbyActionV2Type = method_getImplementation(m);
+            method_setImplementation(m, (IMP)hooked_setNearbyActionV2Type);
+            wp26log(@"[BLE]   hooked setNearbyActionV2Type:");
+        }
+    }
+    // setNearbyActionType:
+    {
+        SEL sel = @selector(setNearbyActionType:);
+        Method m = class_getInstanceMethod(cls, sel);
+        if (m) {
+            s_orig_setNearbyActionType = method_getImplementation(m);
+            method_setImplementation(m, (IMP)hooked_setNearbyActionType);
+            wp26log(@"[BLE]   hooked setNearbyActionType:");
+        }
+    }
+    // v6.3 — additional setter hooks for context
+    #define HOOK_SEL(SELNAME, FN, ORIG) do { \
+        SEL sel = @selector(SELNAME); \
+        Method m = class_getInstanceMethod(cls, sel); \
+        if (m) { ORIG = method_getImplementation(m); \
+            method_setImplementation(m, (IMP)FN); \
+            wp26log(@"[BLE]   hooked " #SELNAME); } \
+    } while(0)
+    HOOK_SEL(setNearbyActionAuthTag:, hooked_setNearbyActionAuthTag, s_orig_setNearbyActionAuthTag);
+    HOOK_SEL(setNearbyActionV2Flags:, hooked_setNearbyActionV2Flags, s_orig_setNearbyActionV2Flags);
+    HOOK_SEL(setNearbyActionV2TargetData:, hooked_setNearbyActionV2TargetData, s_orig_setNearbyActionV2TargetData);
+    HOOK_SEL(setLeAdvName:, hooked_setLeAdvName, s_orig_setLeAdvName);
+    HOOK_SEL(setNearbyActionDeviceClass:, hooked_setNearbyActionDeviceClass, s_orig_setNearbyActionDeviceClass);
+    #undef HOOK_SEL
+}
+
+// =====================================================================
+// HOOKS: NRDeviceMonitor / EPDevice — drain batterie fix (v6.6)
+// =====================================================================
+// ROOT CAUSE: iOS 16 ne sait pas parser l'adv BLE Nearby Action 0x14 émis
+// par watchOS 26. setNearbyActionV2Type reçoit 0x00 → iOS pense que le
+// device est asleep/far → nanoregistryd flappe deviceIsAsleepDidChange
+// toutes les ~5s → le drain batterie bondit.
+//
+// FIX: forcer isAsleep=NO, isNearby=YES, isProximateExpired=NO dans
+// nanoregistryd (là où la décision est prise) pour casser le flapping.
+// =====================================================================
+__attribute__((unused)) static void hookProximityStateSpoofing(void) {
+    // v6.7 : kill-switch runtime. Si /var/tmp/wp26_disable_prox existe, on skip.
+    // Les hooks isAsleep=NO / isNearby=YES causent la Watch à marquer l'iPhone comme déconnecté.
+    // On doit trouver une meilleure approche (peut-être au niveau bluetoothd parser).
+    if (access("/var/tmp/wp26_disable_prox", F_OK) == 0) {
+        wp26log(@" [PROX] KILL-SWITCH ACTIVE (/var/tmp/wp26_disable_prox exists) - skipping hooks");
+        return;
+    }
+
+    dlopen("/System/Library/PrivateFrameworks/NanoRegistry.framework/NanoRegistry", RTLD_LAZY);
+    dlopen("/System/Library/PrivateFrameworks/EmbeddedPairing.framework/EmbeddedPairing", RTLD_LAZY);
+
+    // Helper: hook une méthode -(BOOL)selName d'une classe pour qu'elle retourne une valeur fixe
+    // Retourne 1 si hooké, 0 sinon.
+    int (^hookBoolMethod)(Class, NSString *, BOOL) = ^int(Class cls, NSString *selName, BOOL retVal) {
+        if (!cls) return 0;
+        SEL sel = NSSelectorFromString(selName);
+        if (![cls instancesRespondToSelector:sel]) return 0;
+        Method m = class_getInstanceMethod(cls, sel);
+        if (!m) return 0;
+        class_replaceMethod(cls, sel,
+            imp_implementationWithBlock(^BOOL(id self) { return retVal; }),
+            method_getTypeEncoding(m));
+        wp26log(@" [PROX] Hooked %@.%@ -> %@",
+                NSStringFromClass(cls), selName, retVal ? @"YES" : @"NO");
+        return 1;
+    };
+
+    int hooked = 0;
+
+    // 1. NRDeviceMonitor — émetteur du state asleep/awake/Bluetooth(None)
+    Class nrMonCls = NSClassFromString(@"NRDeviceMonitor");
+    if (nrMonCls) {
+        hooked += hookBoolMethod(nrMonCls, @"isAsleep", NO);
+        hooked += hookBoolMethod(nrMonCls, @"isNearby", YES);
+        hooked += hookBoolMethod(nrMonCls, @"isProximate", YES);
+        hooked += hookBoolMethod(nrMonCls, @"isAwake", YES);
+        // v6.8: hooks critiques pour le companion link "connected" state
+        hooked += hookBoolMethod(nrMonCls, @"isConnected", YES);
+        hooked += hookBoolMethod(nrMonCls, @"isClassCConnected", YES);
+        hooked += hookBoolMethod(nrMonCls, @"isCloudConnected", YES);
+        hooked += hookBoolMethod(nrMonCls, @"isEnabled", YES);
+        hooked += hookBoolMethod(nrMonCls, @"isRegistered", YES);
+    } else {
+        wp26log(@" [PROX] NRDeviceMonitor class NOT found");
+    }
+
+    // 2. EPDevice — propriétés de proximité
+    Class epDevCls = NSClassFromString(@"EPDevice");
+    if (epDevCls) {
+        hooked += hookBoolMethod(epDevCls, @"isProximateExpired", NO);
+        hooked += hookBoolMethod(epDevCls, @"isProximate", YES);
+        hooked += hookBoolMethod(epDevCls, @"isDisplayExpired", NO);
+    } else {
+        wp26log(@" [PROX] EPDevice class NOT found");
+    }
+
+    // 3. NRDevice / NRMutableDevice — propriétés de proximité côté NR
+    for (NSString *clsName in @[@"NRDevice", @"NRMutableDevice", @"NRPairedDevice"]) {
+        Class cls = NSClassFromString(clsName);
+        if (cls) {
+            hooked += hookBoolMethod(cls, @"isProximate", YES);
+            hooked += hookBoolMethod(cls, @"isNearby", YES);
+            hooked += hookBoolMethod(cls, @"isAsleep", NO);
+            hooked += hookBoolMethod(cls, @"isAwake", YES);
+            hooked += hookBoolMethod(cls, @"isConnected", YES);
+        }
+    }
+
+    wp26log(@" [PROX] Total proximity hooks installed: %d", hooked);
+}
+
+static void dumpProximityClasses(void) {
+    wp26log(@"==== PROXIMITY CLASS DUMP START ====");
+
+    // Force load NanoRegistry framework if not loaded
+    dlopen("/System/Library/PrivateFrameworks/NanoRegistry.framework/NanoRegistry", RTLD_LAZY);
+
+    // 1. The key class — proximity timeout check
+    dumpClassMethods(@"EPDevice", @[@"prox", @"display", @"expir", @"state"]);
+    // EPCheckBluetoothForIRK
+    dumpClassMethods(@"EPCheckBluetoothForIRK", @[]);
+
+    // 2. NRDeviceMonitor — emits the asleep/awake/Bluetooth(None) state
+    dumpClassMethods(@"NRDeviceMonitor", @[]);
+
+    // 3. NRDevice — has properties like proximate
+    dumpClassMethods(@"NRDevice", @[@"prox", @"sleep", @"awake", @"nearby", @"state", @"update", @"bluetooth"]);
+    dumpClassMethods(@"NRMutableDevice", @[@"prox", @"sleep", @"nearby", @"state", @"bluetooth"]);
+
+    // 4. CoreBluetooth daemon-side classes (RX scanner)
+    dumpClassMethods(@"CBAdvertiserDaemon", @[@"earby", @"ction", @"date", @"proxim", @"adv", @"discover"]);
+    dumpClassMethods(@"CBScannerDaemon", @[@"earby", @"ction", @"date", @"adv", @"discover"]);
+    dumpClassMethods(@"CBDiscovery", @[]);
+    dumpClassMethods(@"CBDiscoverySummary", @[]);
+    dumpClassMethods(@"CBDevice", @[@"prox", @"earby", @"adv", @"sleep", @"awake"]);
+
+    // 5. BTMagicPairingSettings (mentioned in bluetoothd)
+    dumpClassMethods(@"BTMagicPairingSettings", @[]);
+
+    // 6. List ALL classes whose name matches our patterns of interest
+    wp26log(@"==== Searching ALL loaded classes for Nearby/Proximity/Continuity ====");
+    int numClasses = objc_getClassList(NULL, 0);
+    if (numClasses > 0 && numClasses < 50000) {
+        Class *classes = (Class *)malloc(sizeof(Class) * numClasses);
+        objc_getClassList(classes, numClasses);
+        int found = 0;
+        for (int i = 0; i < numClasses; i++) {
+            const char *cn = class_getName(classes[i]);
+            if (cn && (strstr(cn, "Nearby") || strstr(cn, "Proxim") || strstr(cn, "Continuity")
+                       || strstr(cn, "NRProx") || strstr(cn, "BTMAdv") || strstr(cn, "RPCompanion"))) {
+                wp26log(@"  [CLS] %s", cn);
+                found++;
+                if (found > 100) break;
+            }
+        }
+        free(classes);
+        wp26log(@"  [CLS] (%d classes matched)", found);
+    }
+
+    wp26log(@"==== PROXIMITY CLASS DUMP END ====");
+}
+
+%ctor {
+    @autoreleasepool {
+        NSString *processName = [[NSProcessInfo processInfo] processName];
+        wp26log(@" === Init v4 dans %@ ===", processName);
+
+        // Vider le log au démarrage de SpringBoard
+        if ([processName isEqualToString:@"SpringBoard"]) {
+            [@"=== WP26 LOG START ===\n" writeToFile:WP26_LOG_PATH
+                atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        }
+
+        wp26log(@"=== Init v6.5 dans %@ ===", processName);
+
+        // Créer un fichier témoin par processus (contourne le sandbox)
+        NSString *witness = [NSString stringWithFormat:@"/var/tmp/wp26_%@.txt", processName];
+        [@"loaded" writeToFile:witness atomically:YES encoding:NSUTF8StringEncoding error:nil];
+
+        // ===== HOOKS (dans TOUS les processus ciblés) =====
+        hookNRVersionInfo();
+        hookNRDevice();
+        hookUnpairPrevention();
+        logUnpairMethods();
+
+        // v6.1 — diag dump des classes proximity (uniquement dans bluetoothd pour limiter le bruit)
+        if ([processName isEqualToString:@"bluetoothd"]) {
+            dumpProximityClasses();
+            // v6.2 — install les hooks de monitoring sur les parsers BLE adv
+            hookCBDeviceParsers();
+        }
+
+        // v6.9 — PROX hooks DÉSACTIVÉS. Approche Legizmo : ne PAS injecter dans nanoregistryd.
+        // Fixer les DONNÉES (CFPreferences + MobileAsset) au lieu de forcer le runtime state.
+        // Le drain est fixé par le blocage type=0x00 dans bluetoothd (hookCBDeviceParsers).
+        // if ([processName isEqualToString:@"nanoregistryd"]) {
+        //     hookProximityStateSpoofing();
+        // }
+
+        // v7.2 — Version spoof UNIQUEMENT dans les daemons Watch
+        // NE PAS spoofer dans imagent/identityservicesd (casse iMessage registration chez Apple)
+        NSArray *watchOnlyDaemons = @[@"nanoregistryd", @"pairedsyncd", @"Bridge",
+            @"companionproxyd", @"terminusd", @"nanoregistrylaunchd",
+            @"appconduitd", @"nptocompaniond"];
+        if ([watchOnlyDaemons containsObject:processName]) {
+            hookVersionSpoofing();
+        }
+        // IDS hooks dans tous les daemons sauf SpringBoard (ne touche pas la version)
+        if (![processName isEqualToString:@"SpringBoard"]) {
+            hookIDSService();
+        }
+
+        // v7.0 — Hook identityservicesd pour intercepter les protobufs "unhandled" de la Watch
+        // (pattern Legizmo: service:account:incomingUnhandledProtobuf:fromID:context:)
+        if ([processName isEqualToString:@"identityservicesd"]) {
+            wp26log(@" [IDS] Hooking IDSService delegate for unhandled protobufs...");
+            // Hook ALL classes that implement the IDSServiceDelegate protocol
+            int numClasses = objc_getClassList(NULL, 0);
+            if (numClasses > 0 && numClasses < 50000) {
+                Class *classes = (Class *)malloc(sizeof(Class) * numClasses);
+                objc_getClassList(classes, numClasses);
+                int hooked = 0;
+                SEL unhandledSel = NSSelectorFromString(@"service:account:incomingUnhandledProtobuf:fromID:context:");
+                for (int i = 0; i < numClasses; i++) {
+                    if (class_getInstanceMethod(classes[i], unhandledSel)) {
+                        const char *cn = class_getName(classes[i]);
+                        Method m = class_getInstanceMethod(classes[i], unhandledSel);
+                        IMP origIMP = method_getImplementation(m);
+                        class_replaceMethod(classes[i], unhandledSel,
+                            imp_implementationWithBlock(^(id self, id service, id account, id protobuf, id fromID, id context) {
+                                wp26log(@" [IDS] incomingUnhandledProtobuf from %@ service:%@ proto:%@ ctx:%@",
+                                        fromID, service, [protobuf class], context);
+                                // Call original — let iOS try to handle it
+                                ((void(*)(id, SEL, id, id, id, id, id))origIMP)(self, unhandledSel, service, account, protobuf, fromID, context);
+                            }),
+                            method_getTypeEncoding(m));
+                        wp26log(@" [IDS]   hooked %s for incomingUnhandledProtobuf", cn);
+                        hooked++;
+                    }
+                }
+                free(classes);
+
+                // Also hook incomingData and incomingMessage for logging
+                SEL dataSel = NSSelectorFromString(@"service:account:incomingData:fromID:context:");
+                for (int i = 0; i < numClasses; i++) {
+                    if (class_getInstanceMethod(classes[i], dataSel)) {
+                        // just count, don't hook (too noisy)
+                    }
+                }
+                wp26log(@" [IDS] Total unhandledProtobuf hooks: %d", hooked);
+            }
+        }
+
+        // PassKit hooks dans passd et SpringBoard
+        if ([processName isEqualToString:@"passd"] ||
+            [processName isEqualToString:@"SpringBoard"]) {
+            hookPassKit();
+        }
+
+        // Message relay hooks dans imagent, identityservicesd, SpringBoard
+        if ([processName isEqualToString:@"imagent"] ||
+            [processName isEqualToString:@"identityservicesd"] ||
+            [processName isEqualToString:@"SpringBoard"]) {
+            hookMessageRelay();
+        }
+
+        // ===== Les étapes suivantes seulement dans SpringBoard =====
+        if (![processName isEqualToString:@"SpringBoard"]) {
+            wp26log(@" === Init v4 hooks-only pour %@ ===", processName);
+            return;
+        }
+
+        // ===== 1. CFPREFERENCES =====
+        CFStringRef nr = CFSTR("com.apple.NanoRegistry");
+        setPref(nr, CFSTR("minPairingCompatibilityVersion"), (__bridge CFNumberRef)@(MIN_COMPAT));
+        setPref(nr, CFSTR("maxPairingCompatibilityVersion"), (__bridge CFNumberRef)@(MAX_COMPAT));
+        setPref(nr, CFSTR("IOS_PAIRING_EOL_MIN_PAIRING_COMPATIBILITY_VERSION_CHIPIDS"), CFSTR(""));
+        setPref(nr, CFSTR("minPairingCompatibilityVersionWithChipID"), (__bridge CFNumberRef)@(MIN_COMPAT));
+        CFPreferencesSynchronize(nr, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+        CFPreferencesSynchronize(nr, kCFPreferencesAnyUser, kCFPreferencesCurrentHost);
+
+        CFStringRef ps = CFSTR("com.apple.pairedsync");
+        setPref(ps, CFSTR("activityTimeout"), (__bridge CFNumberRef)@(60));
+        CFPreferencesSynchronize(ps, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+
+        wp26log(@" CFPreferences patched");
+
+        // ===== 2. PLIST DIRECT =====
+        NSString *path = @"/var/mobile/Library/Preferences/com.apple.NanoRegistry.plist";
+        NSMutableDictionary *d = [NSMutableDictionary dictionaryWithContentsOfFile:path];
+        if (!d) d = [NSMutableDictionary dictionary];
+        d[@"minPairingCompatibilityVersion"] = @(MIN_COMPAT);
+        d[@"maxPairingCompatibilityVersion"] = @(MAX_COMPAT);
+        d[@"IOS_PAIRING_EOL_MIN_PAIRING_COMPATIBILITY_VERSION_CHIPIDS"] = @"";
+        d[@"minPairingCompatibilityVersionWithChipID"] = @(MIN_COMPAT);
+        [d writeToFile:path atomically:YES];
+
+        // ===== 3. NEUTRALISER MOBILEASSET =====
+        NSString *assetPath = @"/private/var/MobileAsset/AssetsV2/"
+                               "com_apple_MobileAsset_NanoRegistryPairingCompatibilityIndex";
+        NSFileManager *fm = [NSFileManager defaultManager];
+        if ([fm fileExistsAtPath:assetPath]) {
+            NSString *bak = [assetPath stringByAppendingString:@".wp26bak"];
+            if (![fm fileExistsAtPath:bak]) {
+                [fm moveItemAtPath:assetPath toPath:bak error:nil];
+                wp26log(@" MobileAsset neutralized");
+            }
+        }
+
+        wp26log(@" === Prefs + MobileAsset done ===");
+
+        // ===== 4. INJECTION FORCÉE dans les daemons =====
+        // nathanlr n'injecte que dans SpringBoard.
+        // On force l'injection de notre dylib dans identityservicesd/imagent
+        // en les killant et laissant launchd les relancer avec notre env var.
+        //
+        // Méthode : on crée un script shell qui :
+        // 1. Kill le daemon
+        // 2. Utilise launchctl setenv pour injecter DYLD_INSERT_LIBRARIES
+        // 3. Launchd relance le daemon avec notre dylib
+
+        NSString *dylibPath = @"/var/jb/Library/MobileSubstrate/DynamicLibraries/WatchPair26.dylib";
+
+        // Vérifier si le dylib existe aussi dans TweakInject
+        if (![[NSFileManager defaultManager] fileExistsAtPath:dylibPath]) {
+            dylibPath = @"/var/jb/usr/lib/TweakInject/WatchPair26.dylib";
+        }
+
+        // Créer un script d'injection
+        NSString *script = [NSString stringWithFormat:
+            @"#!/bin/bash\n"
+            "export DYLD_INSERT_LIBRARIES=%@\n"
+            "killall -9 identityservicesd 2>/dev/null\n"
+            "sleep 1\n"
+            "killall -9 imagent 2>/dev/null\n"
+            "sleep 1\n"
+            "killall -9 apsd 2>/dev/null\n"
+            "sleep 1\n"
+            "killall -9 passd 2>/dev/null\n"
+            "sleep 1\n"
+            "# Fichier témoin\n"
+            "echo 'inject_script_ran' > /var/tmp/wp26_inject_ran.txt\n",
+            dylibPath];
+
+        NSString *scriptPath = @"/var/tmp/wp26_inject.sh";
+        [script writeToFile:scriptPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        chmod(scriptPath.fileSystemRepresentation, 0755);
+
+        // Exécuter le script
+        pid_t pid;
+        const char *argv[] = {"/bin/bash", scriptPath.fileSystemRepresentation, NULL};
+        extern char **environ;
+        posix_spawn(&pid, "/bin/bash", NULL, NULL, (char *const *)argv, environ);
+
+        wp26log(@" Script d'injection lancé: %@", dylibPath);
+
+        // Méthode alternative: utiliser launchctl setenv
+        // Ça définit DYLD_INSERT_LIBRARIES pour TOUS les futurs processus launchd
+        const char *launchctlArgv[] = {
+            "/bin/launchctl", "setenv",
+            "DYLD_INSERT_LIBRARIES", dylibPath.fileSystemRepresentation,
+            NULL
+        };
+        pid_t pid2;
+        posix_spawn(&pid2, "/bin/launchctl", NULL, NULL, (char *const *)launchctlArgv, environ);
+        int status2;
+        waitpid(pid2, &status2, 0);
+        wp26log(@" launchctl setenv DYLD_INSERT_LIBRARIES -> %@ (status: %d)", dylibPath, status2);
+
+        // Maintenant kill les daemons pour qu'ils redémarrent avec notre dylib
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC),
+            dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                const char *k1[] = {"/usr/bin/killall", "-9", "identityservicesd", NULL};
+                pid_t p1; posix_spawn(&p1, "/usr/bin/killall", NULL, NULL, (char *const *)k1, environ);
+                waitpid(p1, NULL, 0);
+
+                const char *k2[] = {"/usr/bin/killall", "-9", "imagent", NULL};
+                pid_t p2; posix_spawn(&p2, "/usr/bin/killall", NULL, NULL, (char *const *)k2, environ);
+                waitpid(p2, NULL, 0);
+
+                const char *k3[] = {"/usr/bin/killall", "-9", "apsd", NULL};
+                pid_t p3; posix_spawn(&p3, "/usr/bin/killall", NULL, NULL, (char *const *)k3, environ);
+                waitpid(p3, NULL, 0);
+
+                const char *k4[] = {"/usr/bin/killall", "-9", "passd", NULL};
+                pid_t p4; posix_spawn(&p4, "/usr/bin/killall", NULL, NULL, (char *const *)k4, environ);
+                waitpid(p4, NULL, 0);
+
+                wp26log(@" Daemons IDS+PassKit killés, attente restart avec injection...");
+            });
+
+        wp26log(@" === Init v6.0 complete (SpringBoard) ===");
+    }
+}
