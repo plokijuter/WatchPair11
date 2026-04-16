@@ -1,47 +1,17 @@
 #!/bin/bash
 # WatchPair11 - Post-installation (nathanlr)
 
-echo "[WP11] Post-install: installation du loader daemon..."
-
-# === INSTALLER LE LOADER ===
-ORIG="/var/jb/usr/lib/libTS2JailbreakEnv.dylib"
-BACKUP="/var/jb/usr/lib/libTS2JailbreakEnv_orig.dylib"
-LOADER="/var/jb/Library/MobileSubstrate/DynamicLibraries/WP11Loader.dylib"
-
-if [ -f "$ORIG" ]; then
-    # Backup de l'original (seulement si pas déjà fait)
-    if [ ! -f "$BACKUP" ]; then
-        echo "[WP11] Backup libTS2JailbreakEnv.dylib..."
-        cp "$ORIG" "$BACKUP"
-    fi
-
-    # Remplacer par notre loader
-    if [ -f "$LOADER" ]; then
-        echo "[WP11] Installation du loader..."
-        cp "$LOADER" "$ORIG"
-        ldid -S "$ORIG" 2>/dev/null
-        echo "[WP11] Loader installé!"
-    fi
-fi
-
-# === KILL DAEMONS ===
-echo "[WP11] Kill des daemons Watch..."
-killall -9 nanoregistryd 2>/dev/null || true
+echo "[WP11] Kill des daemons Watch pour reload..."
+killall -9 bluetoothd 2>/dev/null || true
 killall -9 companionproxyd 2>/dev/null || true
 killall -9 nptocompaniond 2>/dev/null || true
 killall -9 terminusd 2>/dev/null || true
 killall -9 pairedsyncd 2>/dev/null || true
 killall -9 Bridge 2>/dev/null || true
-killall -9 passd 2>/dev/null || true
 killall -9 identityservicesd 2>/dev/null || true
 killall -9 imagent 2>/dev/null || true
 killall -9 apsd 2>/dev/null || true
 killall -9 appconduitd 2>/dev/null || true
+killall -9 passd 2>/dev/null || true
 
-echo "[WP11] Daemons Watch redémarrés."
-echo "[WP11] ============================================"
-echo "[WP11] IMPORTANT: Vous devez REJAILBREAK (relancer"
-echo "[WP11] nathanlr) pour que le loader soit actif."
-echo "[WP11] Après rejailbreak, les daemons chargeront"
-echo "[WP11] le tweak automatiquement."
-echo "[WP11] ============================================"
+echo "[WP11] Done. Respring recommande."
