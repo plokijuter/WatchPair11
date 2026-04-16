@@ -12,8 +12,8 @@
 #   4. xpcproxyhook rewrites spawn path AND sets DYLD_INSERT_LIBRARIES=generalhook.dylib
 #   5. posix_spawn resolves symlink to real Apple nanoregistryd (trust level 4)
 #   6. Kernel/sandbox accept the real Apple binary (trust intact)
-#   7. generalhook.dylib is injected via DYLD_INSERT → loads TweakInject → loads WatchPair26
-#   8. WatchPair26 has nanoregistryd in filter → hooks fire
+#   7. generalhook.dylib is injected via DYLD_INSERT → loads TweakInject → loads WatchPair11
+#   8. WatchPair11 has nanoregistryd in filter → hooks fire
 #
 # Advantages: no re-signing needed, trust level preserved, zero risk of sandbox kill
 # Risks: xpcproxyhook may check if target is symlink (unlikely), posix_spawn may re-resolve
@@ -34,7 +34,7 @@ echo "Original binary: $(ls -la $ORIG)"
 echo
 echo "================ STEP 1: cleanup ================"
 rm -f /var/mobile/Library/Logs/CrashReporter/nanoregistryd-*.ips 2>/dev/null
-rm -f /var/tmp/wp26_nanoregistryd.txt 2>/dev/null
+rm -f /var/tmp/wp11_nanoregistryd.txt 2>/dev/null
 rm -f "$SYSBIN" 2>/dev/null
 killall -9 nanoregistryd 2>/dev/null
 sleep 1
@@ -79,11 +79,11 @@ fi
 
 echo
 echo "================ STEP 7: witness file ================"
-if [ -f /var/tmp/wp26_nanoregistryd.txt ]; then
+if [ -f /var/tmp/wp11_nanoregistryd.txt ]; then
     echo "✅✅✅ WITNESS FOUND — tweak loaded via SYMLINK approach! ✅✅✅"
-    ls -la /var/tmp/wp26_nanoregistryd.txt
+    ls -la /var/tmp/wp11_nanoregistryd.txt
     echo "--- log entries ---"
-    grep nanoregistryd /var/tmp/wp26.log 2>&1 | tail -20
+    grep nanoregistryd /var/tmp/wp11.log 2>&1 | tail -20
 else
     echo "❌ No witness file"
 fi
@@ -103,8 +103,8 @@ fi
 echo
 echo "================ DIAGNOSTIC: who called nanoregistryd ================"
 # If xpcproxyhook did its job, the process should have DYLD_INSERT_LIBRARIES in env
-# We can't read another proc's env on iOS directly, but log /var/tmp/wp26.log should show
-grep -i nanoreg /var/tmp/wp26.log 2>&1 | head -5
+# We can't read another proc's env on iOS directly, but log /var/tmp/wp11.log should show
+grep -i nanoreg /var/tmp/wp11.log 2>&1 | head -5
 
 echo
 echo "================ DONE ================"

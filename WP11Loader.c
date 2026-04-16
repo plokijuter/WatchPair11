@@ -1,5 +1,5 @@
 /*
- * WP26Loader - Remplace libTS2JailbreakEnv.dylib
+ * WP11Loader - Remplace libTS2JailbreakEnv.dylib
  *
  * Installation :
  *   1. Renommer /var/jb/usr/lib/libTS2JailbreakEnv.dylib -> libTS2JailbreakEnv_orig.dylib
@@ -19,7 +19,7 @@
 extern const char *getprogname(void);
 
 __attribute__((constructor))
-static void wp26loader_init(void) {
+static void wp11loader_init(void) {
     // 1. Charger l'original libTS2JailbreakEnv
     dlopen("/var/jb/usr/lib/libTS2JailbreakEnv_orig.dylib", RTLD_LAZY);
 
@@ -47,7 +47,7 @@ static void wp26loader_init(void) {
 
             // Fichier témoin
             char path[256];
-            snprintf(path, sizeof(path), "/var/tmp/wp26_%s.txt", procName);
+            snprintf(path, sizeof(path), "/var/tmp/wp11_%s.txt", procName);
             FILE *f = fopen(path, "w");
             if (f) { fprintf(f, "loaded\n"); fclose(f); }
             return;

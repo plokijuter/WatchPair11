@@ -7,7 +7,7 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>DYLD_INSERT_LIBRARIES</key>
-        <string>/var/jb/usr/lib/WP26Loader.dylib</string>
+        <string>/var/jb/usr/lib/WP11Loader.dylib</string>
     </dict>
 </dict>
 </plist>

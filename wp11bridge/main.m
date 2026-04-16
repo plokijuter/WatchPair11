@@ -1,4 +1,4 @@
-// WP26Bridge — Alloy topic bridge daemon
+// WP11Bridge — Alloy topic bridge daemon
 // Registers for IDS Alloy topics that identityservicesd on iOS 16 refuses
 // to route for watchOS 11.5, and forwards them to the appropriate handlers.
 //
@@ -14,7 +14,7 @@
 // IDS framework — loaded dynamically
 // IDSService, IDSServiceDelegate protocol
 
-static void wp26log(NSString *fmt, ...) {
+static void wp11log(NSString *fmt, ...) {
     va_list args;
     va_start(args, fmt);
     NSString *msg = [[NSString alloc] initWithFormat:fmt arguments:args];
@@ -22,67 +22,67 @@ static void wp26log(NSString *fmt, ...) {
     NSDateFormatter *df = [[NSDateFormatter alloc] init];
     [df setDateFormat:@"HH:mm:ss.SSS"];
     NSString *ts = [df stringFromDate:[NSDate date]];
-    NSString *line = [NSString stringWithFormat:@"[%@][wp26bridge] %@\n", ts, msg];
-    NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:@"/var/tmp/wp26bridge.log"];
+    NSString *line = [NSString stringWithFormat:@"[%@][wp11bridge] %@\n", ts, msg];
+    NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:@"/var/tmp/wp11bridge.log"];
     if (!fh) {
-        [[NSFileManager defaultManager] createFileAtPath:@"/var/tmp/wp26bridge.log" contents:nil attributes:nil];
-        fh = [NSFileHandle fileHandleForWritingAtPath:@"/var/tmp/wp26bridge.log"];
+        [[NSFileManager defaultManager] createFileAtPath:@"/var/tmp/wp11bridge.log" contents:nil attributes:nil];
+        fh = [NSFileHandle fileHandleForWritingAtPath:@"/var/tmp/wp11bridge.log"];
     }
     [fh seekToEndOfFile];
     [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
     [fh closeFile];
-    NSLog(@"[wp26bridge] %@", msg);
+    NSLog(@"[wp11bridge] %@", msg);
 }
 
 // IDSServiceDelegate methods we implement
-@interface WP26AlloyBridge : NSObject
+@interface WP11AlloyBridge : NSObject
 @end
 
-@implementation WP26AlloyBridge
+@implementation WP11AlloyBridge
 
 - (void)service:(id)service account:(id)account incomingMessage:(id)message fromID:(id)fromID context:(id)context {
-    wp26log(@"incomingMessage from %@ service:%@ msg:%@", fromID, service, message);
+    wp11log(@"incomingMessage from %@ service:%@ msg:%@", fromID, service, message);
 }
 
 - (void)service:(id)service account:(id)account incomingData:(id)data fromID:(id)fromID context:(id)context {
-    wp26log(@"incomingData from %@ service:%@ len:%lu", fromID, service, (unsigned long)[data length]);
+    wp11log(@"incomingData from %@ service:%@ len:%lu", fromID, service, (unsigned long)[data length]);
 }
 
 - (void)service:(id)service account:(id)account incomingUnhandledProtobuf:(id)protobuf fromID:(id)fromID context:(id)context {
-    wp26log(@"incomingUnhandledProtobuf from %@ service:%@ proto:%@ ctx:%@",
+    wp11log(@"incomingUnhandledProtobuf from %@ service:%@ proto:%@ ctx:%@",
             fromID, service, [protobuf class], context);
 }
 
 - (void)service:(id)service account:(id)account incomingResourceAtURL:(id)url metadata:(id)metadata fromID:(id)fromID context:(id)context {
-    wp26log(@"incomingResource from %@ service:%@ url:%@", fromID, service, url);
+    wp11log(@"incomingResource from %@ service:%@ url:%@", fromID, service, url);
 }
 
 - (void)service:(id)service didSwitchActivePairedDevice:(id)device acknowledgementBlock:(id)block {
-    wp26log(@"didSwitchActivePairedDevice: %@", device);
+    wp11log(@"didSwitchActivePairedDevice: %@", device);
 }
 
 @end
 
 int main(int argc, char *argv[]) {
     @autoreleasepool {
-        wp26log(@"=== WP26Bridge starting ===");
+        wp11log(@"=== WP11Bridge starting ===");
 
         // Load IDS framework
         void *ids = dlopen("/System/Library/PrivateFrameworks/IDS.framework/IDS", RTLD_LAZY);
         if (!ids) {
-            wp26log(@"ERROR: Failed to load IDS.framework: %s", dlerror());
+            wp11log(@"ERROR: Failed to load IDS.framework: %s", dlerror());
             return 1;
         }
-        wp26log(@"IDS.framework loaded");
+        wp11log(@"IDS.framework loaded");
 
         // Get IDSService class
         Class IDSServiceClass = NSClassFromString(@"IDSService");
         if (!IDSServiceClass) {
-            wp26log(@"ERROR: IDSService class not found");
+            wp11log(@"ERROR: IDSService class not found");
             return 1;
         }
 
-        WP26AlloyBridge *bridge = [[WP26AlloyBridge alloc] init];
+        WP11AlloyBridge *bridge = [[WP11AlloyBridge alloc] init];
 
         // Alloy topics we want to register for
         NSArray *topics = @[
@@ -110,19 +110,19 @@ int main(int argc, char *argv[]) {
                         [inv setArgument:&del atIndex:2];
                         [inv setArgument:&q atIndex:3];
                         [inv invoke];
-                        wp26log(@"Registered for topic: %@", topic);
+                        wp11log(@"Registered for topic: %@", topic);
                     } else {
-                        wp26log(@"WARNING: service %@ doesn't respond to addDelegate:queue:", topic);
+                        wp11log(@"WARNING: service %@ doesn't respond to addDelegate:queue:", topic);
                     }
                 } else {
-                    wp26log(@"WARNING: Failed to init IDSService for %@", topic);
+                    wp11log(@"WARNING: Failed to init IDSService for %@", topic);
                 }
             } @catch (NSException *e) {
-                wp26log(@"ERROR registering %@: %@", topic, e);
+                wp11log(@"ERROR registering %@: %@", topic, e);
             }
         }
 
-        wp26log(@"=== WP26Bridge ready, entering run loop ===");
+        wp11log(@"=== WP11Bridge ready, entering run loop ===");
         [[NSRunLoop mainRunLoop] run];
     }
     return 0;

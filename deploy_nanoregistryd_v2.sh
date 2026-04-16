@@ -17,7 +17,7 @@
 # Prerequisites on device:
 #   - /var/jb/basebins/ldid_dpkg_autosign exists
 #   - /var/jb/usr/bin/ct_bypass exists
-#   - WatchPair26 v6.5 is installed with bluetoothd in filter
+#   - WatchPair11 v6.5 is installed with bluetoothd in filter
 #   - Entitlements xml uploaded to /var/jb/basebins/entitlements/nanoregistryd.xml
 
 set +e  # Don't exit on individual errors, we want diagnostics
@@ -45,7 +45,7 @@ echo "All prerequisites present."
 echo
 echo "================ STEP 1: cleanup previous state ================"
 rm -f /var/mobile/Library/Logs/CrashReporter/nanoregistryd-*.ips 2>/dev/null
-rm -f /var/tmp/wp26_nanoregistryd.txt 2>/dev/null
+rm -f /var/tmp/wp11_nanoregistryd.txt 2>/dev/null
 rm -f "$SYSBIN" 2>/dev/null
 # Kill existing instance if any
 killall -9 nanoregistryd 2>/dev/null
@@ -108,11 +108,11 @@ fi
 
 echo
 echo "================ STEP 9: witness file ================"
-if [ -f /var/tmp/wp26_nanoregistryd.txt ]; then
+if [ -f /var/tmp/wp11_nanoregistryd.txt ]; then
     echo "✅✅✅ WITNESS FOUND — tweak loaded into nanoregistryd! ✅✅✅"
-    ls -la /var/tmp/wp26_nanoregistryd.txt
-    echo "--- nanoregistryd entries in wp26.log ---"
-    grep nanoregistryd /var/tmp/wp26.log 2>&1 | tail -20
+    ls -la /var/tmp/wp11_nanoregistryd.txt
+    echo "--- nanoregistryd entries in wp11.log ---"
+    grep nanoregistryd /var/tmp/wp11.log 2>&1 | tail -20
 else
     echo "❌ No witness file"
 fi
