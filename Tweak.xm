@@ -901,6 +901,209 @@ static void hookMessageRelay(void) {
 }
 
 // =====================================================================
+// HOOKS: APSSupport — Fix envoi Messages depuis la Watch
+// Inspiré de WatchFix (577fkj/WatchFix, GPLv3)
+// Après chaque incomingPresence de la Watch, force sendProxyIsConnected:YES
+// pour que apsd signale correctement la connexion proxy APS.
+// Sans ça, les messages sortants depuis la Watch ne partent pas.
+// =====================================================================
+static void hookAPSSupport(void) {
+    Class proxyClass = NSClassFromString(@"APSProxyClient");
+    if (!proxyClass) {
+        wp11log(@"[APS] APSProxyClient not found, skipping");
+        return;
+    }
+
+    SEL presenceSel = NSSelectorFromString(@"incomingPresenceWithCertificate:nonce:signature:token:hwVersion:swVersion:swBuild:");
+    Method m = class_getInstanceMethod(proxyClass, presenceSel);
+    if (!m) {
+        wp11log(@"[APS] incomingPresence method not found");
+        return;
+    }
+
+    IMP origIMP = method_getImplementation(m);
+    class_replaceMethod(proxyClass, presenceSel,
+        imp_implementationWithBlock(^(id self, NSData *cert, NSData *nonce, NSData *sig,
+                                      NSData *token, NSString *hwVer, NSString *swVer, NSString *swBuild) {
+            wp11log(@"[APS] incomingPresence: hw=%@ sw=%@ build=%@", hwVer, swVer, swBuild);
+
+            // Call original
+            ((void(*)(id, SEL, NSData*, NSData*, NSData*, NSData*, NSString*, NSString*, NSString*))origIMP)
+                (self, presenceSel, cert, nonce, sig, token, hwVer, swVer, swBuild);
+
+            // Check if proxy client is active and connected
+            BOOL isActive = NO;
+            SEL activeSel = NSSelectorFromString(@"isActive");
+            if ([self respondsToSelector:activeSel]) {
+                isActive = ((BOOL(*)(id, SEL))objc_msgSend)(self, activeSel);
+            }
+            if (!isActive) {
+                wp11log(@"[APS] client not active, skip");
+                return;
+            }
+
+            // Check connected on interface 0 or 1
+            SEL connSel = NSSelectorFromString(@"isConnectedOnInterface:");
+            SEL disconnSel = NSSelectorFromString(@"needsToDisconnectOnInterface:");
+            BOOL connected = NO;
+            if ([self respondsToSelector:connSel] && [self respondsToSelector:disconnSel]) {
+                for (int iface = 0; iface <= 1; iface++) {
+                    BOOL conn = ((BOOL(*)(id, SEL, int))objc_msgSend)(self, connSel, iface);
+                    BOOL disc = ((BOOL(*)(id, SEL, int))objc_msgSend)(self, disconnSel, iface);
+                    if (conn && !disc) {
+                        connected = YES;
+                        break;
+                    }
+                }
+            }
+            if (!connected) {
+                wp11log(@"[APS] not connected on any interface, skip");
+                return;
+            }
+
+            // Read _guid ivar
+            NSString *guid = nil;
+            Ivar guidIvar = class_getInstanceVariable([self class], "_guid");
+            if (guidIvar) {
+                guid = object_getIvar(self, guidIvar);
+            }
+
+            // Read _environment ivar -> name
+            NSString *envName = nil;
+            Ivar envIvar = class_getInstanceVariable([self class], "_environment");
+            if (envIvar) {
+                id env = object_getIvar(self, envIvar);
+                SEL nameSel = NSSelectorFromString(@"name");
+                if (env && [env respondsToSelector:nameSel]) {
+                    envName = ((NSString*(*)(id, SEL))objc_msgSend)(env, nameSel);
+                }
+            }
+
+            // Get proxyManager and send connected state
+            SEL pmSel = NSSelectorFromString(@"proxyManager");
+            if (!guid || !envName || ![self respondsToSelector:pmSel]) {
+                wp11log(@"[APS] missing state: guid=%@ env=%@", guid, envName);
+                return;
+            }
+
+            id proxyManager = ((id(*)(id, SEL))objc_msgSend)(self, pmSel);
+            SEL sendSel = NSSelectorFromString(@"sendProxyIsConnected:guid:environmentName:");
+            if (proxyManager && [proxyManager respondsToSelector:sendSel]) {
+                ((void(*)(id, SEL, BOOL, NSString*, NSString*))objc_msgSend)
+                    (proxyManager, sendSel, YES, guid, envName);
+                wp11log(@"[APS] sendProxyIsConnected:YES guid=%@ env=%@", guid, envName);
+            }
+        }),
+        method_getTypeEncoding(m));
+
+    wp11log(@"[APS] APSSupport hooks initialized (Messages fix)");
+}
+
+// =====================================================================
+// HOOKS: AppsSupport — Fix apps Watch absentes / auto-desinstallées
+// Inspiré de WatchFix (577fkj/WatchFix, GPLv3)
+// 1. Ajoute MobileSMS au mapping apps systeme (empêche la desinstallation auto)
+// 2. Spoof la version watchOS pour la validation des bundles embedded Watch
+// =====================================================================
+static void hookAppsSupport(void) {
+    // --- Hook 1: ACXAvailableApplicationManager (dans appconduitd) ---
+    // Ajoute MobileSMS au mapping supplemental pour watchOS 6+
+    Class appManagerClass = NSClassFromString(@"ACXAvailableApplicationManager");
+    if (appManagerClass) {
+        SEL mappingSel = NSSelectorFromString(@"_supplementalSystemAppBundleIDMappingForWatchOSSixAndLater");
+        Method m = class_getInstanceMethod(appManagerClass, mappingSel);
+        if (m) {
+            IMP origIMP = method_getImplementation(m);
+            class_replaceMethod(appManagerClass, mappingSel,
+                imp_implementationWithBlock(^NSDictionary *(id self) {
+                    NSDictionary *orig = ((NSDictionary*(*)(id, SEL))origIMP)(self, mappingSel);
+                    NSMutableDictionary *mapping = [orig mutableCopy] ?: [NSMutableDictionary dictionary];
+                    [mapping setObject:@"com.apple.MobileSMS" forKey:@"com.apple.MobileSMS"];
+                    wp11log(@"[Apps] Added MobileSMS to supplemental mapping (%lu entries)", (unsigned long)mapping.count);
+                    return mapping;
+                }),
+                method_getTypeEncoding(m));
+            wp11log(@"[Apps] ACXAvailableApplicationManager hook installed");
+        }
+    }
+
+    // --- Hook 2: MIEmbeddedWatchBundle (dans installd) ---
+    // Spoof la version watchOS pour que tous les bundles passent la validation
+    Class watchBundleClass = NSClassFromString(@"MIEmbeddedWatchBundle");
+    if (watchBundleClass) {
+        // isApplicableToKnownWatchOSVersion → force via isApplicableToOSVersion:error:
+        SEL applicableSel = NSSelectorFromString(@"isApplicableToKnownWatchOSVersion");
+        Method am = class_getInstanceMethod(watchBundleClass, applicableSel);
+        if (am) {
+            class_replaceMethod(watchBundleClass, applicableSel,
+                imp_implementationWithBlock(^BOOL(id self) {
+                    SEL spoofSel = NSSelectorFromString(@"isApplicableToOSVersion:error:");
+                    if ([self respondsToSelector:spoofSel]) {
+                        return ((BOOL(*)(id, SEL, NSString*, id*))objc_msgSend)(self, spoofSel, @"11.9999", nil);
+                    }
+                    return YES;
+                }),
+                method_getTypeEncoding(am));
+        }
+
+        // currentOSVersionForValidationWithError: → return "11.9999"
+        SEL versionSel = NSSelectorFromString(@"currentOSVersionForValidationWithError:");
+        Method vm = class_getInstanceMethod(watchBundleClass, versionSel);
+        if (vm) {
+            class_replaceMethod(watchBundleClass, versionSel,
+                imp_implementationWithBlock(^NSString *(id self, id *error) {
+                    return @"11.9999";
+                }),
+                method_getTypeEncoding(vm));
+        }
+
+        wp11log(@"[Apps] MIEmbeddedWatchBundle hooks installed (version spoof 11.9999)");
+    }
+}
+
+// =====================================================================
+// HOOKS: IDS UTun — Fix compatibilité couche IDS tunnel
+// Inspiré de WatchFix (577fkj/WatchFix, GPLv3)
+// Hook IDSUTunControlMessage_Hello pour forcer la version de compatibilité
+// du service IDS, empêchant le rejet des messages Watch.
+// =====================================================================
+static void hookIDSUTun(void) {
+    Class helloClass = NSClassFromString(@"IDSUTunControlMessage_Hello");
+    if (!helloClass) {
+        wp11log(@"[UTun] IDSUTunControlMessage_Hello not found, skipping");
+        return;
+    }
+
+    SEL setMinSel = NSSelectorFromString(@"setServiceMinCompatibilityVersion:");
+    Method m = class_getInstanceMethod(helloClass, setMinSel);
+    if (!m) {
+        wp11log(@"[UTun] setServiceMinCompatibilityVersion: not found");
+        return;
+    }
+
+    class_replaceMethod(helloClass, setMinSel,
+        imp_implementationWithBlock(^(id self, NSNumber *version) {
+            NSInteger v = [version integerValue];
+            wp11log(@"[UTun] setServiceMinCompatibilityVersion: %ld", (long)v);
+            // Si la version min est trop basse (< 18), on la monte pour que
+            // le handshake IDS accepte notre device comme compatible
+            if (v < 18) {
+                v = MAX_COMPAT;
+                wp11log(@"[UTun] -> forced to %ld", (long)v);
+            }
+            NSNumber *newVersion = [NSNumber numberWithInteger:v];
+            // Set via ivar directly (comme WatchFix)
+            Ivar ivar = class_getInstanceVariable([self class], "_serviceMinCompatibilityVersion");
+            if (ivar) {
+                object_setIvar(self, ivar, newVersion);
+            }
+        }),
+        method_getTypeEncoding(m));
+
+    wp11log(@"[UTun] IDSUTunControlMessage_Hello hook installed");
+}
+
+// =====================================================================
 // LOGGER: Liste toutes les méthodes unpair-related (sans les bloquer)
 // =====================================================================
 static void logUnpairMethods(void) {
@@ -1566,6 +1769,22 @@ static void dumpProximityClasses(void) {
             [processName isEqualToString:@"identityservicesd"] ||
             [processName isEqualToString:@"SpringBoard"]) {
             hookMessageRelay();
+        }
+
+        // v7.3 — APSSupport: fix envoi Messages depuis la Watch (inspiré WatchFix)
+        if ([processName isEqualToString:@"apsd"]) {
+            hookAPSSupport();
+        }
+
+        // v7.3 — AppsSupport: fix apps Watch absentes (inspiré WatchFix)
+        if ([processName isEqualToString:@"appconduitd"] ||
+            [processName isEqualToString:@"installd"]) {
+            hookAppsSupport();
+        }
+
+        // v7.3 — IDS UTun: fix compatibilité tunnel IDS (inspiré WatchFix)
+        if ([processName isEqualToString:@"identityservicesd"]) {
+            hookIDSUTun();
         }
 
         // ===== Les étapes suivantes seulement dans SpringBoard =====

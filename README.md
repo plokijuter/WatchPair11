@@ -20,19 +20,19 @@ Inspire par [Legizmo](https://chariz.com/buy/legizmo-moonstone) (architecture He
 
 | Feature | Statut | Detail |
 |---|---|---|
-| **Messages (iMessage/SMS)** | Partiel | Les messages recus s'affichent sur la Watch. **Envoyer un message depuis la Watch ne fonctionne pas.** |
-| **Messenger** | Partiel | L'app Messenger n'apparait pas sur la Watch, mais la reception et la reponse aux messages fonctionnent via les notifications. |
+| **Messages (iMessage/SMS)** | Partiel | Reception OK. Envoi depuis la Watch : **fix v7.3** (hook APSSupport), a tester. |
+| **Messenger** | Partiel | L'app n'apparait pas sur la Watch, mais reception et reponse fonctionnent via les notifications. **Fix v7.3** (hook AppsSupport), a tester. |
 | **Health/Sante** | Non teste | Sync donnees sante potentiellement cassee (necessite injection nanoregistryd, pas possible sans boot loops). |
 | **Maps** | Non teste | Navigation Watch -> iPhone potentiellement cassee. |
 | **Music sync** | Non teste | Transfert de playlists vers la Watch non verifie. |
-| **Install apps** | Non teste | Installation d'apps tierces depuis l'iPhone non verifiee. |
+| **Install apps** | Non teste | Installation d'apps tierces depuis l'iPhone non verifiee. **Fix v7.3** (hook AppsSupport), a tester. |
 | **Walkie-Talkie** | Non teste | Necessite Alloy topics supplementaires. |
 
 ### Pourquoi ces limitations
 
 Le tweak ne peut **pas** s'injecter dans `nanoregistryd` (le daemon central Apple Watch) sans provoquer des boot loops et casser Alloy/IDS. L'injection est bloquee par le sandbox kernel (`trustLevel=0` pour les binaires re-signes au runtime). Seuls les daemons pre-signes par nathanlr au moment du jailbreak (bluetoothd, SpringBoard, installd...) sont hookables.
 
-Les features manquantes (Messages sortants, Messenger) necessiteraient des hooks dans des daemons non injectables ou des Alloy topics que iOS 16 refuse de router pour watchOS 11.5.
+> **v7.3** integre des hooks inspires de [WatchFix](https://github.com/577fkj/WatchFix) (GPLv3) pour corriger Messages, l'installation d'apps, et la compatibilite IDS UTun. Ces fixes ciblent `apsd`, `appconduitd`, `installd` et `identityservicesd` qui sont deja injectables.
 
 ## Requis
 
@@ -97,5 +97,6 @@ wp11bridge/                # Daemon bridge Alloy IDS topics
 - [watched](https://github.com/34306/watched) — point de depart (bypass NanoRegistry via plist)
 - [Legizmo](https://chariz.com/buy/legizmo-moonstone) — architecture de reference (plugins Hephaestus par daemon). Si vous cherchez une solution maintenue et complete, achetez Legizmo.
 - [nathanlr](https://github.com/verygenericname/nathanlr) — jailbreak iOS 16
+- [WatchFix](https://github.com/577fkj/WatchFix) (GPLv3) — hooks APSSupport, AppsSupport et IDS UTun integres en v7.3
 - [ChOma](https://github.com/opa334/ChOma) — ct_bypass pour la signature CoreTrust
 - [furiousMAC/continuity](https://github.com/furiousMAC/continuity) — documentation des TLV BLE Apple Continuity
