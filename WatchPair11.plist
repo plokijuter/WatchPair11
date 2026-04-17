@@ -10,7 +10,6 @@
 			nanoregistrylaunchd,
 			appconduitd,
 			installd,
-			identityservicesd,
 			apsd,
 			imagent,
 			nptocompaniond,

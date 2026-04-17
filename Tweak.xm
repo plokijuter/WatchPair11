@@ -1764,9 +1764,10 @@ static void dumpProximityClasses(void) {
             hookPassKit();
         }
 
-        // Message relay hooks dans imagent, identityservicesd, SpringBoard
+        // Message relay hooks — imagent + SpringBoard only
+        // v7.4 FIX: retiré identityservicesd — IMService/CKSMSRelayAccount classes
+        // n'existent pas dans identityservicesd context → objc_msgSend crash au ctor
         if ([processName isEqualToString:@"imagent"] ||
-            [processName isEqualToString:@"identityservicesd"] ||
             [processName isEqualToString:@"SpringBoard"]) {
             hookMessageRelay();
         }

@@ -16,3 +16,6 @@ layout/
 
 # Local environment
 *.log
+
+# Device backups (large tarballs, not source)
+backups/
