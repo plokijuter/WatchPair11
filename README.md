@@ -1,61 +1,92 @@
 # WatchPair11
 
-Tweak jailbreak pour jumeler une Apple Watch **watchOS 11.5** avec un iPhone **iOS 16** via le jailbreak [nathanlr](https://github.com/verygenericname/nathanlr).
+## Description
 
-Inspire par [Legizmo](https://chariz.com/buy/legizmo-moonstone) (architecture Hephaestus, approche hooks multi-daemons). Ce projet est un effort independant de reverse engineering, pas un fork de Legizmo.
+WatchPair11 est un tweak iOS pour [nathanlr](https://github.com/verygenericname/nathanlr) (iOS 16.6) qui permet de jumeler une Apple Watch **watchOS 11.5** avec un iPhone **iOS 16**. Bypass NanoRegistry + MobileAsset + CFPreferences flush, avec fix drain batterie BLE et support iMessage relay via Watch.
 
 > **Ce repo n'est pas activement maintenu.** C'est un projet personnel qui repond a un besoin specifique (garder iOS 16 avec une Watch recente). Les issues et PRs seront lus mais pas forcement traites rapidement. Utilisez a vos risques.
 
-## Ce qui marche
+## Fonctionnalites qui MARCHENT
 
-- Pairing initial watchOS 11.5 <-> iOS 16
-- Sync initiale
-- Configuration des cadrans depuis l'iPhone
-- Pas de depairage force
-- Batterie normale (~1.2%/h, pas de drain BLE)
-- Notifications push vers la Watch
-- Apps Watch natives (Meteo, Minuteur, Alarmes, Boussole...)
+- Pairing watchOS 11.5 <-> iOS 16 (iPhone 14 Pro Max teste)
+- BLE drain fix (batterie normale, bloc 0x00 BLE type)
+- Apple Messages (iMessage) sur Watch : envoi + reception + notifications
+- Toutes les notifications 3rd-party arrivent sur Watch (Facebook Messenger, WhatsApp, etc.)
+- Reponse aux notifications depuis Watch (via UI watchOS generique)
+- Pairing stable apres reboot + re-JB
 
-## Problemes connus
+## Fonctionnalites qui NE MARCHENT PAS
 
-| Feature | Statut | Detail |
-|---|---|---|
-| **Messages (iMessage/SMS)** | Partiel | Reception OK. Envoi depuis la Watch : **fix v7.3** (hook APSSupport), a tester. |
-| **Messenger** | Partiel | L'app n'apparait pas sur la Watch, mais reception et reponse fonctionnent via les notifications. **Fix v7.3** (hook AppsSupport), a tester. |
-| **Health/Sante** | Non teste | Sync donnees sante potentiellement cassee (necessite injection nanoregistryd, pas possible sans boot loops). |
-| **Maps** | Non teste | Navigation Watch -> iPhone potentiellement cassee. |
-| **Music sync** | Non teste | Transfert de playlists vers la Watch non verifie. |
-| **Install apps** | Non teste | Installation d'apps tierces depuis l'iPhone non verifiee. **Fix v7.3** (hook AppsSupport), a tester. |
-| **Walkie-Talkie** | Non teste | Necessite Alloy topics supplementaires. |
+- **Apple Pay "Ajouter carte"** : bloque cote serveur Apple. Apple refuse le provisioning de cartes Watch sur combinaison incompatible iOS 16 + watchOS 11.5. Pas fixable par un tweak local puisque la validation est faite sur les serveurs Apple.
+- **Icone Facebook Messenger sur ecran d'accueil Watch** : Facebook a retire son app Watch depuis 2018. L'app iPhone Messenger ne contient plus de bundle watchOS. Les notifications arrivent quand meme (via systeme iOS).
 
-### Pourquoi ces limitations
+## Prerequis
 
-Le tweak ne peut **pas** s'injecter dans `nanoregistryd` (le daemon central Apple Watch) sans provoquer des boot loops et casser Alloy/IDS. L'injection est bloquee par le sandbox kernel (`trustLevel=0` pour les binaires re-signes au runtime). Seuls les daemons pre-signes par nathanlr au moment du jailbreak (bluetoothd, SpringBoard, installd...) sont hookables.
-
-> **v7.3** integre des hooks inspires de [WatchFix](https://github.com/577fkj/WatchFix) (GPLv3) pour corriger Messages, l'installation d'apps, et la compatibilite IDS UTun. Ces fixes ciblent `apsd`, `appconduitd`, `installd` et `identityservicesd` qui sont deja injectables.
-
-## Requis
-
-- iPhone avec **iOS 16.5 - 16.7** jailbreake avec **nathanlr**
-- [Theos](https://theos.dev/) configure avec le SDK iOS 16
-- Apple Watch sous **watchOS 11.x**
+- iPhone supporte par nathanlr (iPhone 14 Pro Max teste, iOS 16.5.1 - 16.7.x sur A15/A16)
+- nathanlr jailbreak installe (https://github.com/verygenericname/nathanlr)
+- Sileo ou autre package manager
 
 ## Installation
 
-### Via Sileo
+1. Telecharge le `.deb` depuis [Releases](https://github.com/plokijuter/WatchPair11/releases)
+2. Installe via Sileo (Ouvre `.deb` avec Sileo)
+3. Respring
+4. (La premiere fois) Pair ta Apple Watch watchOS 11.5 normalement
 
-1. Telecharger le `.deb` depuis les [Releases](https://github.com/plokijuter/WatchPair11/releases)
-2. Ouvrir le fichier avec Sileo
-3. Installer
+## Credits / Remerciements
 
-### Via SSH
+Ce projet n'aurait pas ete possible sans le travail de :
 
-```bash
-scp -P 2222 *.deb mobile@127.0.0.1:/tmp/
-ssh -p 2222 mobile@127.0.0.1 "sudo dpkg -i /tmp/com.watchpair11.tweak_*.deb"
-```
+- **[577fkj/WatchFix](https://github.com/577fkj/WatchFix)** (GPLv3) : Source d'inspiration pour les hooks `APSSupport`, `AppsSupport`, `IDSUTun`. Le code original de ces hooks vient de WatchFix adapte pour notre contexte nathanlr.
+- **[opa334/ChOma](https://github.com/opa334/ChOma)** (MIT) : Bibliotheque de parsing Mach-O + exploit CoreTrust CVE-2023-41991. Nous avons porte `ct_bypass` vers Linux/WSL (remplacant CoreFoundation par libplist) pour permettre la signature des binaires daemon hors de l'iPhone.
+- **[opa334/TrollStore](https://github.com/opa334/TrollStore)** : Source de `fastPathSign` (integration ChOma pour signing) + pattern d'injection.
+- **[verygenericname/nathanlr](https://github.com/verygenericname/nathanlr)** : Le jailbreak semi-tethered qui permet tout ce projet sur iOS 16.5.1 - 16.7.x A15/A16. Merci pour le support open-source.
+- **[verygenericname/nathanlr_hooks](https://github.com/verygenericname/nathanlr_hooks)** : Les hooks `launchd`/`generalhook`/`xpcproxy` qui permettent l'injection dans SysBins.
+- **[SerotoninApp/Serotonin](https://github.com/SerotoninApp/Serotonin)** : Base de `launchdhook` (csops CS_PLATFORM_BINARY force).
+- **[Dopamine / opa334](https://github.com/opa334/Dopamine)** : Reference pour `systemhook` et `jbctl trustcache add` (meme si non portable sur nathanlr).
+- **Legizmo Moonstone (lunotech11)** : Reference commerciale, a inspire l'approche technique et les classes cibles `ACXAvailableApplicationManager`, `MIEmbeddedWatchBundle`, `APSProxyClient`, `IDSUTunControlMessage_Hello`.
 
-### Depuis les sources
+## Architecture technique
+
+Le tweak injecte dans 4 processus iOS 16 :
+
+- **SpringBoard** : spoof version iOS 18.5, hook CFPreferences pairing compatibility, PassKit compat
+- **bluetoothd** : BLE drain fix (block NearbyAction type 0x00)
+- **appconduitd** : `AppsSupport` hook (MobileSMS supplemental mapping)
+- **installd** : `MIEmbeddedWatchBundle` version spoof (watchOS 11.9999)
+
+Les 2 daemons `apsd` et `identityservicesd` sont **intentionnellement non-injectes** :
+
+- `apsd` : hook APSSupport cassait les push notifs 3rd-party (v7.6 revert)
+- `identityservicesd` : hook IMService causait SIGSEGV dans Logos ctor (v7.4 revert)
+
+## Limitations connues
+
+- Tweak developpe sur iPhone 14 Pro Max iOS 16.6 + Apple Watch 6 watchOS 11.5. Autres combinaisons non testees.
+- Apple Pay fonctionnel sur les cartes deja provisionnees avant pairing iOS 16/watchOS 11.5. Ajouter une NOUVELLE carte = bloque server-side.
+- watchOS updates via iPhone pairing ne fonctionneront pas (iOS 16 ne supporte pas watchOS 11+ officiellement).
+
+## Source du ct_bypass_linux
+
+Le sous-dossier `ctbypass_artifacts/` contient :
+
+- `ct_bypass_linux` : binaire Linux x86_64 qui signe des Mach-O iOS arm64 avec bypass CoreTrust
+- `build_linux_ctbp.sh` : script build
+- `compat_headers/` : shims Apple (mach, mach-o, libkern, CommonCrypto)
+- `coretrust_bug_libplist_patch.c` : version patched de `coretrust_bug.c` utilisant libplist au lieu de CoreFoundation
+- `main_linux.c` : wrapper minimal pour Linux host
+- `prepare_daemon.sh` : pipeline complet (patch arm64 + ldid sign + ct_bypass)
+
+Ceci permet de signer n'importe quel daemon iOS depuis un host Linux sans Mac.
+
+## Changelog
+
+- **v7.6** (actuel) : Desactive `hookAPSSupport` (cassait push notifs 3rd-party)
+- **v7.4** : Retire `identityservicesd` du filter (crash Logos ctor)
+- **v7.3** : Integration hooks WatchFix (APSSupport, AppsSupport, IDSUTun)
+- **v6.9** : Recette initiale validee (SpringBoard + bluetoothd seulement)
+
+## Installation depuis les sources
 
 ```bash
 make package
@@ -63,40 +94,9 @@ make package
 
 Apres l'installation, **rejailbreak** (relancer nathanlr) pour que le loader soit actif.
 
-## Comment ca marche
+### Via SSH
 
-| Processus | Hook |
-|---|---|
-| **bluetoothd** | Bloque `setNearbyActionV2Type:0x00` — le BLE advertisement type 0x14 de watchOS 11.5 n'est pas reconnu par le parser iOS 16, ce qui causait un drain batterie (flapping asleep/awake toutes les ~5s) |
-| **SpringBoard** | Spoof CFPreferences (`maxPairingCompatibilityVersion=99`), spoof `operatingSystemVersion` -> 18.5.0 |
-| **Daemons IDS** (identityservicesd, imagent, apsd...) | `IDSAccount` availability -> YES, `minCompatibilityVersion` -> 1 |
-| **Tous les process filtres** | `NRDevice.compatibilityState` -> COMPATIBLE, prevention du depairage force |
-
-### Process filtres (WatchPair11.plist)
-
-SpringBoard, bluetoothd, Bridge, companionproxyd, terminusd, pairedsyncd, nanoregistrylaunchd, appconduitd, installd, identityservicesd, apsd, imagent, nptocompaniond, passd
-
-### Ce que le tweak ne fait PAS (et pourquoi)
-
-- **Pas d'injection dans nanoregistryd** — cause des boot loops + casse Alloy/IDS. Le sandbox kernel kill le process re-signe (trustLevel=0).
-- **Pas de force-state hooks** (`isAsleep=NO`, `isConnected=YES`) — casse la connexion Watch reelle.
-
-## Structure
-
+```bash
+scp -P 2222 *.deb mobile@127.0.0.1:/tmp/
+ssh -p 2222 mobile@127.0.0.1 "sudo dpkg -i /tmp/com.watchpair11.tweak_*.deb"
 ```
-Tweak.xm                  # Source principal (~1600 lignes)
-WP11Loader.c              # Loader qui remplace libTS2JailbreakEnv.dylib
-WatchPair11.plist          # Filtre MobileSubstrate (process cibles)
-Makefile                   # Build Theos (rootless)
-wp11bridge/                # Daemon bridge Alloy IDS topics
-  main.m                   # Enregistre les Alloy topics manquants sur iOS 16
-```
-
-## Credits
-
-- [watched](https://github.com/34306/watched) — point de depart (bypass NanoRegistry via plist)
-- [Legizmo](https://chariz.com/buy/legizmo-moonstone) — architecture de reference (plugins Hephaestus par daemon). Si vous cherchez une solution maintenue et complete, achetez Legizmo.
-- [nathanlr](https://github.com/verygenericname/nathanlr) — jailbreak iOS 16
-- [WatchFix](https://github.com/577fkj/WatchFix) (GPLv3) — hooks APSSupport, AppsSupport et IDS UTun integres en v7.3
-- [ChOma](https://github.com/opa334/ChOma) — ct_bypass pour la signature CoreTrust
-- [furiousMAC/continuity](https://github.com/furiousMAC/continuity) — documentation des TLV BLE Apple Continuity
