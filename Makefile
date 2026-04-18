@@ -10,7 +10,7 @@ include $(THEOS)/makefiles/common.mk
 TWEAK_NAME = WatchPair11
 
 $(TWEAK_NAME)_FILES = Tweak.xm
-$(TWEAK_NAME)_CFLAGS = -fobjc-arc
+$(TWEAK_NAME)_CFLAGS = -fobjc-arc -Wno-error=unused-function
 $(TWEAK_NAME)_FRAMEWORKS = Foundation CoreFoundation
 WatchPair11_LIBRARIES = substrate
 $(TWEAK_NAME)_LDFLAGS = -ldl

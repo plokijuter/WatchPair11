@@ -399,6 +399,61 @@ static void hookNRDevice(void) {
     }
 }
 
+// v7.14: NARROW Watch productType spoof — runs ONLY in passd (Apple Pay preflight path)
+// This avoids breaking SpringBoard/Bridge launch which other processes need
+__attribute__((unused))
+static void hookPassdModelSpoof(void) {
+    // Hook NRDevice.valueForProperty: ONLY in passd context
+    // Spoof ProductType to Watch6,14 (Series 8, native iOS 16 support)
+    Class NRDev = NSClassFromString(@"NRDevice");
+    if (!NRDev) {
+        wp11log(@" [passd-model] NRDevice not loaded");
+        return;
+    }
+    SEL valPropSel = NSSelectorFromString(@"valueForProperty:");
+    if (![NRDev instancesRespondToSelector:valPropSel]) return;
+    Method m = class_getInstanceMethod(NRDev, valPropSel);
+    IMP origIMP = method_getImplementation(m);
+    typedef id (*OrigFunc)(id, SEL, id);
+    class_replaceMethod(NRDev, valPropSel,
+        imp_implementationWithBlock(^id(id self, id property) {
+            id result = ((OrigFunc)origIMP)(self, valPropSel, property);
+            if ([property isKindOfClass:[NSString class]]) {
+                NSString *prop = (NSString *)property;
+                if ([prop containsString:@"ProductType"] || [prop isEqualToString:@"ProductType"]) {
+                    if ([result isKindOfClass:[NSString class]] &&
+                        [(NSString *)result hasPrefix:@"Watch"]) {
+                        wp11log(@" [passd-model] Watch productType %@ → Watch6,14", result);
+                        return @"Watch6,14";
+                    }
+                }
+            }
+            return result;
+        }),
+        method_getTypeEncoding(m));
+    wp11log(@" [passd-model] Hooked NRDevice.valueForProperty: for productType spoof");
+
+    // v7.15: Hook the PRIMARY PassKit productType extractor used by all Apple Pay checks
+    void *pkc = dlopen("/System/Library/PrivateFrameworks/PassKitCore.framework/PassKitCore", RTLD_LAZY);
+    if (pkc) {
+        void *sym = dlsym(pkc, "PKProductTypeFromNRDevice");
+        wp11log(@" [passd-model] PKProductTypeFromNRDevice sym=%p", sym);
+        if (sym) {
+            static NSString *(*orig_tmp)(id) = NULL;
+            // Use block-style replacement via MSHookFunction
+            MSHookFunction(sym, (void *)(^NSString *(id dev) {
+                NSString *o = orig_tmp ? orig_tmp(dev) : nil;
+                if (o && [o hasPrefix:@"Watch"]) {
+                    wp11log(@" [PK-model] PKProductTypeFromNRDevice %@ → Watch6,14", o);
+                    return @"Watch6,14";
+                }
+                return o;
+            }), (void **)&orig_tmp);
+            wp11log(@" [passd-model] Hooked PKProductTypeFromNRDevice");
+        }
+    }
+}
+
 // =====================================================================
 // HOOKS: Bloquer les notifications d'unpair forcé
 // =====================================================================
@@ -629,6 +684,175 @@ static void hookPassKit(void) {
     }
 
     wp11log(@"PassKit hooks initialized");
+}
+
+// ----- Top-level replacements for NPK C functions (for MSHookFunction) -----
+static BOOL (*orig_NPKAddToWatch)(id) = NULL;
+static BOOL (*orig_NPKSEProv)(id) = NULL;
+static BOOL (*orig_NPKGlory)(id) = NULL;
+static BOOL (*orig_NPKConnectedFromService)(id) = NULL;
+static BOOL (*orig_NPKCurrentlyPairing)(void) = NULL;
+static BOOL repl_NPKAddToWatch(id pass) {
+    wp11log(@" [passd] NPKIsAddToWatchSupported → YES (forced)");
+    return YES;
+}
+static BOOL repl_NPKSEProv(id dev) {
+    wp11log(@" [passd] CanProvisionSecureElementPasses → YES (forced)");
+    return YES;
+}
+static BOOL repl_NPKGlory(id dev) {
+    wp11log(@" [passd] IsPairedDeviceGloryOrLater → YES (forced)");
+    return YES;
+}
+// CRITICAL: v7.8 — master quick-check gate. When this returns NO, NanoPassKit UI
+// fires GIZMO_UNREACHABLE alert in <1s without any server call.
+static BOOL repl_NPKConnectedFromService(id service) {
+    wp11log(@" [passd] NPKIsConnectedToPairedOrPairingDeviceFromService → YES (forced)");
+    return YES;
+}
+static BOOL repl_NPKCurrentlyPairing(void) {
+    // Say we're NOT currently pairing (so flow doesn't get blocked by "in-progress" state)
+    return NO;
+}
+
+// =====================================================================
+// HOOKS: passd — Apple Pay provisioning bypass (v7.7)
+// Strategy discovered via NanoPassKit.tbd + PassKitCore.tbd RE :
+//   • Apple EXPOSES native override keys (PKDeveloperSettingsEnabled,
+//     PKDeviceInformationOverrideProductType, PKClientHTTPHeaderOSPartOverride,
+//     PKClientHTTPHeaderHardwarePlatformOverride, PKBypassCertValidation)
+//   • NanoPassKit has Tinker/Demo/Simulated modes → relaxes validation
+//   • PKPaymentDeviceRegistrationData._productType is settable iVar
+//   • NPKPaymentPreflighter iVars expose all pre-flight flags
+// =====================================================================
+static void hookPassd(void) {
+    wp11log(@" [passd] === Apple Pay bypass v7.9 (truly surgical) starting ===");
+
+    // v7.9: MINIMAL scope - don't break Wallet UI
+    //   Learnings from v7.7/v7.8:
+    //   - NSUserDefaults global writes → broke Wallet
+    //   - NPKBluetoothConnectivityCoordinator, NPKCompanionAgentConnection blanket hooks → broke Wallet
+    //   - connectionAvailableActions → 0xFFFFFFFF → NSInvalidArgumentException
+    //   - NPKPaymentPreflighter _needs*/_checked* blanket → breaks Wallet library sync
+    //
+    // v7.9 keeps ONLY:
+    //   1. The 5 NPKIs* C function hooks (only fire on Add Card quick-check)
+    //   2. One specific XPC responder method:
+    //      -[NPDCompanionPassLibrary canAddSecureElementPassWithConfiguration:completion:]
+    //      This is the exact XPC server method Bridge calls for Add Card.
+
+    dlopen("/System/Library/PrivateFrameworks/NanoPassKit.framework/NanoPassKit", RTLD_LAZY);
+
+    // ---- Step 1: 5 C function gates ----
+    void *npk = dlopen("/System/Library/PrivateFrameworks/NanoPassKit.framework/NanoPassKit", RTLD_LAZY);
+    if (npk) {
+        void *addrMaster = dlsym(npk, "NPKIsConnectedToPairedOrPairingDeviceFromService");
+        void *addrPairing = dlsym(npk, "NPKIsCurrentlyPairing");
+        void *addrAddToWatch = dlsym(npk, "NPKIsAddToWatchSupportedForCompanionPaymentPass");
+        void *addrSEProv = dlsym(npk, "NPKPairedOrPairingDeviceCanProvisionSecureElementPasses");
+        void *addrGloryOrLater = dlsym(npk, "NPKIsPairedDeviceGloryOrLater");
+        if (addrMaster) MSHookFunction((void *)addrMaster, (void *)repl_NPKConnectedFromService, (void **)&orig_NPKConnectedFromService);
+        if (addrPairing) MSHookFunction((void *)addrPairing, (void *)repl_NPKCurrentlyPairing, (void **)&orig_NPKCurrentlyPairing);
+        if (addrAddToWatch) MSHookFunction((void *)addrAddToWatch, (void *)repl_NPKAddToWatch, (void **)&orig_NPKAddToWatch);
+        if (addrSEProv) MSHookFunction((void *)addrSEProv, (void *)repl_NPKSEProv, (void **)&orig_NPKSEProv);
+        if (addrGloryOrLater) MSHookFunction((void *)addrGloryOrLater, (void *)repl_NPKGlory, (void **)&orig_NPKGlory);
+        wp11log(@" [passd] 5 NPK C gates hooked");
+    }
+
+    // ---- Step 2: THE XPC server method that Bridge hits during Add Card ----
+    Class passLib = NSClassFromString(@"NPDCompanionPassLibrary");
+    if (passLib) {
+        SEL sel = NSSelectorFromString(@"canAddSecureElementPassWithConfiguration:completion:");
+        if ([passLib instancesRespondToSelector:sel]) {
+            Method m = class_getInstanceMethod(passLib, sel);
+            class_replaceMethod(passLib, sel,
+                imp_implementationWithBlock(^void(id self, id cfg, void(^completion)(BOOL, NSError *)){
+                    wp11log(@" [NPDCompanionPassLibrary] canAddSecureElementPass → (YES, nil) (forced)");
+                    if (completion) completion(YES, nil);
+                }),
+                method_getTypeEncoding(m));
+            wp11log(@" [passd] Hooked -[NPDCompanionPassLibrary canAddSecureElementPassWithConfiguration:completion:]");
+        }
+    } else {
+        wp11log(@" [passd] NPDCompanionPassLibrary NOT found (will be in NPKCompanionAgent)");
+    }
+
+    wp11log(@" [passd] === v7.9 surgical bypass installed ===");
+}
+
+// v7.8 — posix_spawn hook in SpringBoard to force DYLD_INSERT_LIBRARIES
+// into Bridge.app when it spawns. No snprintf/format strings (logos bug).
+static int (*orig_posix_spawn)(pid_t *pid, const char *path,
+                               const posix_spawn_file_actions_t *file_actions,
+                               const posix_spawnattr_t *attrp,
+                               char *const argv[],
+                               char *const envp[]) = NULL;
+
+// v7.10: Hook in xpcproxy (where app spawns happen).
+// Catch Bridge.app path (which nathanlr xpcproxyhook skips since not in allowed prefixes)
+// Inject DYLD_INSERT_LIBRARIES=generalhook.dylib so generalhook loads WatchPair11 via TweakInject.
+static int repl_posix_spawn(pid_t *pid, const char *path,
+                            const posix_spawn_file_actions_t *file_actions,
+                            const posix_spawnattr_t *attrp,
+                            char *const argv[],
+                            char *const envp[]) {
+    // Intercept Bridge.app launch from xpcproxy
+    BOOL isBridge = path && (strstr(path, "/Bridge.app/Bridge") != NULL);
+    BOOL isVarContainers = path && (strstr(path, "/var/containers/Bundle/Application/") != NULL ||
+                                     strstr(path, "/private/var/containers/Bundle/Application/") != NULL);
+
+    if (isBridge && isVarContainers) {
+        wp11log(@" [xpcproxy] Bridge intercepted, injecting generalhook+WatchPair11");
+
+        // Inject generalhook (which auto-loads TweakLoader + all TweakInject filters)
+        const char *injectLib = "/var/jb/usr/lib/hooks/generalhook.dylib:/var/jb/Library/MobileSubstrate/DynamicLibraries/WatchPair11.dylib";
+
+        int nenv = 0;
+        if (envp) for (char *const *e = envp; *e; e++) nenv++;
+
+        char **newenv = (char **)calloc(nenv + 2, sizeof(char *));
+        int ni = 0;
+        BOOL foundDyld = NO;
+
+        // Build "DYLD_INSERT_LIBRARIES=<lib>" manually (no format string)
+        size_t dlibLen = strlen(injectLib);
+        char *dyldBuf = (char *)malloc(dlibLen + 32);
+        strcpy(dyldBuf, "DYLD_INSERT_LIBRARIES=");
+        strcat(dyldBuf, injectLib);
+
+        if (envp) {
+            for (char *const *e = envp; *e; e++) {
+                if (strncmp(*e, "DYLD_INSERT_LIBRARIES=", 22) == 0) {
+                    size_t exLen = strlen(*e);
+                    char *mixed = (char *)malloc(dlibLen + exLen + 32);
+                    strcpy(mixed, "DYLD_INSERT_LIBRARIES=");
+                    strcat(mixed, injectLib);
+                    strcat(mixed, ":");
+                    strcat(mixed, (*e) + 22);
+                    newenv[ni++] = mixed;
+                    foundDyld = YES;
+                } else {
+                    newenv[ni++] = *e;
+                }
+            }
+        }
+        if (!foundDyld) {
+            newenv[ni++] = dyldBuf;
+        } else {
+            free(dyldBuf);
+        }
+        newenv[ni] = NULL;
+
+        int result = orig_posix_spawn(pid, path, file_actions, attrp, argv, newenv);
+        wp11log(@" [xpcproxy] Bridge spawned pid=%d result=%d", pid ? *pid : -1, result);
+        return result;
+    }
+    return orig_posix_spawn(pid, path, file_actions, attrp, argv, envp);
+}
+
+static void hookBridgeSpawn(void) {
+    wp11log(@" [xpcproxy] Installing posix_spawn hook");
+    MSHookFunction((void *)posix_spawn, (void *)repl_posix_spawn, (void **)&orig_posix_spawn);
 }
 
 // =====================================================================
@@ -1727,6 +1951,12 @@ static void dumpProximityClasses(void) {
     wp11log(@"==== PROXIMITY CLASS DUMP END ====");
 }
 
+
+static void br_notify_cb(CFNotificationCenterRef center, void *observer,
+                          CFStringRef name, const void *object, CFDictionaryRef userInfo) {
+    wp11log(@" [BRIDGE-MON] 🔔 %@", (__bridge NSString *)name);
+}
+
 %ctor {
     @autoreleasepool {
         NSString *processName = [[NSProcessInfo processInfo] processName];
@@ -1738,6 +1968,25 @@ static void dumpProximityClasses(void) {
                 atomically:YES encoding:NSUTF8StringEncoding error:nil];
         }
 
+        // v7.12: Listen for Bridge darwin notifications to trace MiniHook activity
+        if ([processName isEqualToString:@"SpringBoard"]) {
+            static const CFNotificationName brNames[] = {
+                CFSTR("com.wp11.bridge.ctor"), CFSTR("com.wp11.bridge.ctor_done"),
+                CFSTR("com.wp11.bridge.npk_connected_called"),
+                CFSTR("com.wp11.bridge.npk_connected_hooked"),
+                CFSTR("com.wp11.bridge.npk_sym_not_found"),
+                CFSTR("com.wp11.bridge.npk_dlopen_failed"),
+                CFSTR("com.wp11.bridge.bps_hooked"),
+                CFSTR("com.wp11.bridge.gizmo_unreach_alert_hooked"),
+            };
+            CFNotificationCenterRef cn = CFNotificationCenterGetDarwinNotifyCenter();
+            for (int i = 0; i < 8; i++) {
+                CFNotificationCenterAddObserver(cn, NULL, br_notify_cb,
+                    brNames[i], NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
+            }
+            wp11log(@" [BRIDGE-MON] listeners armed (8 notifications)");
+        }
+
         wp11log(@"=== Init v6.5 dans %@ ===", processName);
 
         // Créer un fichier témoin par processus (contourne le sandbox)
@@ -1745,10 +1994,15 @@ static void dumpProximityClasses(void) {
         [@"loaded" writeToFile:witness atomically:YES encoding:NSUTF8StringEncoding error:nil];
 
         // ===== HOOKS (dans TOUS les processus ciblés) =====
-        hookNRVersionInfo();
-        hookNRDevice();
-        hookUnpairPrevention();
-        logUnpairMethods();
+        // v7.11: Skip global NR hooks in NPKCompanionAgent — they break Wallet UI.
+        // NPKCompanionAgent ONLY gets hookPassd() for canAddSecureElementPass bypass.
+        BOOL isNPKCompanionAgent = [processName isEqualToString:@"NPKCompanionAgent"];
+        if (!isNPKCompanionAgent) {
+            hookNRVersionInfo();
+            hookNRDevice();
+            hookUnpairPrevention();
+            logUnpairMethods();
+        }
 
         // v6.1 — diag dump des classes proximity (uniquement dans bluetoothd pour limiter le bruit)
         if ([processName isEqualToString:@"bluetoothd"]) {
@@ -1773,7 +2027,8 @@ static void dumpProximityClasses(void) {
             hookVersionSpoofing();
         }
         // IDS hooks dans tous les daemons sauf SpringBoard (ne touche pas la version)
-        if (![processName isEqualToString:@"SpringBoard"]) {
+        // v7.11: aussi skip in NPKCompanionAgent
+        if (![processName isEqualToString:@"SpringBoard"] && !isNPKCompanionAgent) {
             hookIDSService();
         }
 
@@ -1822,6 +2077,26 @@ static void dumpProximityClasses(void) {
         if ([processName isEqualToString:@"passd"] ||
             [processName isEqualToString:@"SpringBoard"]) {
             hookPassKit();
+        }
+
+        // v7.7 — passd-specific Apple Pay bypass (native Apple override keys)
+        // v7.8 — also run in SpringBoard + Bridge (wherever injection reaches)
+        if ([processName isEqualToString:@"passd"] ||
+            [processName isEqualToString:@"SpringBoard"] ||
+            [processName isEqualToString:@"Bridge"] ||
+            [processName isEqualToString:@"NPKCompanionAgent"]) {
+            hookPassd();
+        }
+
+        // v7.14: Watch productType spoof — ONLY in passd (safe scope for Apple Pay preflight)
+        if ([processName isEqualToString:@"passd"]) {
+            hookPassdModelSpoof();
+        }
+
+        // v7.10 — hook posix_spawn in xpcproxy (where app spawns actually happen)
+        // xpcproxy is injected because /usr/libexec/ matches xpcproxyhook allowed prefix
+        if ([processName isEqualToString:@"xpcproxy"]) {
+            hookBridgeSpawn();
         }
 
         // Message relay hooks — imagent + SpringBoard only
