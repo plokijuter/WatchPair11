@@ -907,6 +907,7 @@ static void hookMessageRelay(void) {
 // pour que apsd signale correctement la connexion proxy APS.
 // Sans ça, les messages sortants depuis la Watch ne partent pas.
 // =====================================================================
+__attribute__((unused))
 static void hookAPSSupport(void) {
     Class proxyClass = NSClassFromString(@"APSProxyClient");
     if (!proxyClass) {
@@ -1024,6 +1025,65 @@ static void hookAppsSupport(void) {
                 }),
                 method_getTypeEncoding(m));
             wp11log(@"[Apps] ACXAvailableApplicationManager hook installed");
+        }
+
+        // --- Hook 1b (v7.5): _bundleIDsOfInstallableSystemAppsForLocallyAvailableApps ---
+        // Force Messages + Wallet dans la liste installable pour la Watch
+        // Check both ACXAvailableApplicationManager ET ACXAvailableSystemAppList
+        SEL installableSel = NSSelectorFromString(@"_bundleIDsOfInstallableSystemAppsForLocallyAvailableApps");
+        Class listClass = NSClassFromString(@"ACXAvailableSystemAppList");
+
+        for (Class cls in @[appManagerClass, listClass ?: (id)[NSNull null]]) {
+            if (!cls || cls == (id)[NSNull null]) continue;
+            Method im = class_getInstanceMethod(cls, installableSel);
+            if (im) {
+                IMP origIMPi = method_getImplementation(im);
+                class_replaceMethod(cls, installableSel,
+                    imp_implementationWithBlock(^NSArray *(id self) {
+                        NSArray *orig = ((NSArray*(*)(id, SEL))origIMPi)(self, installableSel);
+                        NSMutableSet *set = [NSMutableSet setWithArray:orig ?: @[]];
+                        [set addObject:@"com.apple.MobileSMS"];
+                        [set addObject:@"com.apple.Passbook"];
+                        [set addObject:@"com.apple.NanoPassbook"];
+                        NSArray *result = [set allObjects];
+                        wp11log(@"[Apps] _bundleIDsOfInstallable(%@) force-added MobileSMS + Passbook (%lu entries)", NSStringFromClass(cls), (unsigned long)result.count);
+                        return result;
+                    }),
+                    method_getTypeEncoding(im));
+                wp11log(@"[Apps] _bundleIDsOfInstallable hook installed on %@", NSStringFromClass(cls));
+            } else {
+                wp11log(@"[Apps] _bundleIDsOfInstallable NOT found on %@", NSStringFromClass(cls));
+            }
+        }
+
+        // --- Hook 1c (v7.5): _bundleIDsOfInstallableSystemAppsIgnoringCounterpartAvailability ---
+        SEL ignoreSel = NSSelectorFromString(@"_bundleIDsOfInstallableSystemAppsIgnoringCounterpartAvailability");
+        Method igm = class_getInstanceMethod(appManagerClass, ignoreSel);
+        if (igm) {
+            IMP origIMPig = method_getImplementation(igm);
+            class_replaceMethod(appManagerClass, ignoreSel,
+                imp_implementationWithBlock(^NSArray *(id self) {
+                    NSArray *orig = ((NSArray*(*)(id, SEL))origIMPig)(self, ignoreSel);
+                    NSMutableSet *set = [NSMutableSet setWithArray:orig ?: @[]];
+                    [set addObject:@"com.apple.MobileSMS"];
+                    [set addObject:@"com.apple.Passbook"];
+                    [set addObject:@"com.apple.NanoPassbook"];
+                    return [set allObjects];
+                }),
+                method_getTypeEncoding(igm));
+        }
+
+        // --- Hook 1d (v7.5): _appIsInstallable ---
+        // Force TOUT app à être installable côté Watch
+        SEL installSel = NSSelectorFromString(@"_appIsInstallable:");
+        Method iim = class_getInstanceMethod(appManagerClass, installSel);
+        if (iim) {
+            class_replaceMethod(appManagerClass, installSel,
+                imp_implementationWithBlock(^BOOL(id self, id app) {
+                    return YES;
+                }),
+                method_getTypeEncoding(iim));
+            wp11log(@"[Apps] _appIsInstallable hook installed (always YES)");
         }
     }
 
@@ -1773,9 +1833,13 @@ static void dumpProximityClasses(void) {
         }
 
         // v7.3 — APSSupport: fix envoi Messages depuis la Watch (inspiré WatchFix)
-        if ([processName isEqualToString:@"apsd"]) {
-            hookAPSSupport();
-        }
+        // v7.6 DISABLED: APSSupport breaks third-party push notifications (Messenger)
+        // User rapport : avant WatchPair Messenger notifs arrivaient sur Watch.
+        // Post-APSSupport hook : notifs Messenger bloquées.
+        // Root cause : notre force sendProxyIsConnected:YES interfère avec proxy state machine.
+        // if ([processName isEqualToString:@"apsd"]) {
+        //     hookAPSSupport();
+        // }
 
         // v7.3 — AppsSupport: fix apps Watch absentes (inspiré WatchFix)
         if ([processName isEqualToString:@"appconduitd"] ||
