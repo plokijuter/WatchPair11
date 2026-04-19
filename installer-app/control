@@ -1,0 +1,11 @@
+Package: com.watchpair11.installer
+Name: WatchPair11 Installer
+Version: 1.0-1
+Architecture: iphoneos-arm
+Maintainer: plokijuter <plokijuter@hotmail.com>
+Author: plokijuter
+Section: Applications
+Description: Home-screen installer for WatchPair11 tweak + Apple Pay. One-tap setup for pairing watchOS 11.5 with iOS 16. Includes auto-rollback.
+Depends: mobilesubstrate, preferenceloader
+Depfile: 7.16
+Installprefix: /
