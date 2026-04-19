@@ -37,7 +37,24 @@ WatchPair11 est un tweak iOS pour [nathanlr](https://github.com/verygenericname/
 
 Après install tu auras : pairing watchOS 11.5, BLE drain fix, iMessage/notifs Watch. **Apple Pay n'est PAS activé par défaut** — c'est une étape séparée ci-dessous.
 
-## 🆕 Apple Pay Setup — 3 options
+## 🆕 Apple Pay Setup — 4 options
+
+### Option 0 — Home-screen installer app (LE PLUS SIMPLE, recommandé débutants)
+
+1. Download `com.watchpair11.installer_1.0-1_iphoneos-arm64.deb` depuis [Releases](https://github.com/plokijuter/WatchPair11/releases/latest)
+2. Install via Sileo → respring
+3. Tap icône **WatchPair11** sur home screen
+4. Boutons :
+   - **1. Install Pairing + Notifs** — déploie la dylib + filter, kill daemons
+   - **2. Install Apple Pay** — deploy passd SysBins + override + 8 prefs (confirm dialog)
+   - **Rollback All** — restore état de base, efface Apple Pay setup
+5. Reboot + re-JB après Apple Pay install
+
+L'app embed toutes les ressources (`WatchPair11.dylib`, `passd_signed`, override plist, prefs). Aucun SSH, aucun terminal, backup auto, log live scrollable dans l'UI. Fonctionne via `sudo_spawn_root` pour l'élévation.
+
+**Note** : l'installer app **remplace** le `.deb` principal du tweak pour qui préfère cette approche. Si tu l'utilises, tu n'as PAS besoin d'installer `com.watchpair11.tweak_*.deb` séparément.
+
+## Apple Pay Setup — options classiques (SSH / dpkg)
 
 **⚠️ Pourquoi le setup est séparé de l'install de base :**
 
@@ -168,7 +185,13 @@ Le `ct_bypass_linux` résultant peut signer tout binaire iOS arm64/arm64e avec T
 
 ## Changelog
 
-- **v7.16** (actuel) : **Scripts automation Apple Pay setup** + cleaner postinst
+- **v7.16 + installer app** (actuel) : **Home-screen installer app** one-tap setup
+  - `installer-app/` : app iOS autonome (Theos application_modern, UIKit)
+  - Embed toutes les ressources (`WatchPair11.dylib`, `passd_signed`, overrides, prefs)
+  - 3 boutons : Install Tweak / Install Apple Pay / Rollback — aucun SSH requis
+  - `sudo_spawn_root` pour élévation depuis user app
+  - Live log UITextView + status refresh + confirm dialogs
+- **v7.16** : **Scripts automation Apple Pay setup** + cleaner postinst
   - `scripts/setup-applepay.sh` : script installation Apple Pay avec sanity checks + backup
   - `scripts/rollback-applepay.sh` : revert complet en cas de problème
   - Bundled dans `.deb` sous `/var/jb/opt/watchpair11/`
