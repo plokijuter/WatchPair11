@@ -14,12 +14,12 @@ WatchPair11 est un tweak iOS pour [nathanlr](https://github.com/verygenericname/
 - **Toutes les notifications 3rd-party** arrivent sur Watch (Facebook Messenger, WhatsApp, etc.)
 - **Réponse aux notifications** depuis Watch (via UI watchOS générique)
 - **Pairing stable** après reboot + re-JB
-- **🆕 Apple Pay "Ajouter carte" à la Watch** (v7.15+, voir setup spécifique ci-dessous)
+- **🆕 Apple Pay "Ajouter carte" à la Watch** (v7.15+, setup optionnel séparé)
 
 ## Fonctionnalités qui NE MARCHENT PAS
 
-- **Icône Facebook Messenger sur écran d'accueil Watch** : Facebook a retiré son app Watch depuis 2018. L'app iPhone Messenger ne contient plus de bundle watchOS. Les notifications arrivent quand même (via système iOS).
-- **watchOS updates via iPhone pairing** : iOS 16 ne supporte pas officiellement watchOS 11+, donc impossible de faire des updates watchOS depuis le pairing iPhone.
+- **Icône Facebook Messenger sur écran d'accueil Watch** : Facebook a retiré son app Watch depuis 2018.
+- **watchOS updates via iPhone pairing** : iOS 16 ne supporte pas officiellement watchOS 11+.
 
 ## Prérequis
 
@@ -27,174 +27,217 @@ WatchPair11 est un tweak iOS pour [nathanlr](https://github.com/verygenericname/
 - nathanlr jailbreak installé (https://github.com/verygenericname/nathanlr)
 - Sileo ou autre package manager
 
-## Installation
-
-1. Télécharge le `.deb` depuis [Releases](https://github.com/plokijuter/WatchPair11/releases)
-2. Installe via Sileo (ouvre `.deb` avec Sileo)
-3. Respring
-4. (La première fois) Pair ta Apple Watch watchOS 11.5 normalement
-
-## 🆕 Setup Apple Pay (v7.15+)
-
-Le provisioning Apple Pay nécessite une configuration manuelle supplémentaire car les daemons PassKit nécessitent une injection via SysBins + CoreTrust bypass, non couverte par nathanlr.
-
-### Étape 1 : Build ct_bypass_linux (arm64e capable)
-
-Notre port Linux de ChOma `ct_bypass` supporte désormais arm64e (contribution unique). Depuis un host Linux/WSL :
+## Installation de base (pairing + notifs, SANS Apple Pay)
 
 ```bash
-cd ctbypass_artifacts/
-bash build_linux_ctbp.sh
-# → Produit /tmp/ts_build/out/ct_bypass_linux
+# 1. Télécharge le .deb depuis Releases
+# 2. Installe via Sileo (Ouvre .deb avec Sileo)
+# 3. Respring
 ```
 
-### Étape 2 : Signer passd avec notre TeamID bypass
+Après install tu auras : pairing watchOS 11.5, BLE drain fix, iMessage/notifs Watch. **Apple Pay n'est PAS activé par défaut** — c'est une étape séparée ci-dessous.
+
+## 🆕 Apple Pay Setup — 3 options
+
+**⚠️ Pourquoi le setup est séparé de l'install de base :**
+
+Apple Pay nécessite de signer et déployer un `passd` custom via SysBins (pipeline CoreTrust bypass). Ce setup :
+- Est **spécifique à ton build iOS exact** (binaire passd bundled est pour iOS 16.6 build 20G75)
+- Nécessite **root + reboot + re-JB** pour prendre effet
+- Peut causer **safe mode** si ton setup diffère (iPhone différent, iOS différent)
+
+Donc on le sépare de l'install de base pour éviter de brick des devices incompatibles.
+
+### Option 1 — Setup automatique lors de l'installation
+
+Si tu es sur **iOS 16.6 build 20G75 exactement** (vérifier via `Settings → General → About`) :
 
 ```bash
-# Pull original passd depuis iPhone
-scp mobile@iphone:/System/Library/PrivateFrameworks/PassKitCore.framework/passd /tmp/passd
-
-# Prep entitlements (strip seatbelt, ajoute platform-application + get-task-allow)
-ldid -e /tmp/passd > /tmp/passd_orig_ents.plist
-# (utiliser prep_passd_ents.py pour l'auto-prep)
-
-# arm64e → arm64 patch + sign
-printf '\x00\x00\x00\x00' | dd of=/tmp/passd bs=1 seek=8 count=4 conv=notrunc
-ldid -S/tmp/passd_final_ents.xml -Icom.apple.passd /tmp/passd
-/tmp/ts_build/out/ct_bypass_linux /tmp/passd
-# → passd signé TeamID T8ALTGMVXN via CVE-2023-41991
+# Sur iPhone via Terminal (NewTerm / etc.)
+export WATCHPAIR11_AUTO_APPLEPAY=1
+sudo dpkg -i /path/to/com.watchpair11.tweak_7.16-*.deb
 ```
 
-### Étape 3 : Deploy SysBins pipeline
+Le postinst va auto-exécuter le script Apple Pay. Reboot + Re-JB ensuite.
+
+### Option 2 — Setup manuel (RECOMMANDÉ, plus safe)
+
+Installation standard du .deb, puis lance le setup quand tu es prêt :
 
 ```bash
-# Sur iPhone (via SSH avec sudo)
-sudo mkdir -p /var/jb/System/Library/SysBins/PassKitCore.framework
-sudo cp /tmp/passd /var/jb/System/Library/SysBins/PassKitCore.framework/passd
-sudo chmod 755 /var/jb/System/Library/SysBins/PassKitCore.framework/passd
+# 1. Install standard
+sudo dpkg -i /path/to/com.watchpair11.tweak_7.16-*.deb
 
-# Override plist pour que launchd utilise notre binaire avec DYLD_INSERT
-sudo cp com.apple.passd.bin.plist /var/jb/Library/LaunchDaemons/com.apple.passd.plist
-sudo launchctl unload /System/Library/LaunchDaemons/com.apple.passd.plist
-sudo launchctl load /var/jb/Library/LaunchDaemons/com.apple.passd.plist
+# 2. Teste d'abord l'install de base (pairing, notifs)
+#    Respring + verify app Watch s'ouvre normalement
+
+# 3. QUAND PRÊT, lance le setup Apple Pay
+sudo bash /var/jb/opt/watchpair11/setup-applepay.sh
+
+# 4. Reboot + Re-JB nathanlr
+
+# 5. Add card via app Watch → Wallet
 ```
 
-### Étape 4 : Override PassKit preferences
+Ce script fait des sanity checks (version iOS, fichiers présents), **backup ton état actuel avant modifs**, puis déploie. Si erreur → t'affiche comment rollback.
 
-Ajoute ces clés dans `/var/mobile/Library/Preferences/com.apple.passd.plist` :
+### Option 3 — Setup fully manuel (experts, custom iOS version)
 
-```xml
-<key>PKIsUserPropertyOverrideEnabled</key><true/>
-<key>PKBypassCertValidation</key><true/>
-<key>PKBypassStockholmRegionCheck</key><true/>
-<key>PKBypassImmoTokenCountCheck</key><true/>
-<key>PKDeveloperLoggingEnabled</key><true/>
-<key>PKClientHTTPHeaderHardwarePlatformOverride</key><string>iPhone15,3</string>
-<key>PKClientHTTPHeaderOSPartOverride</key><string>iPhone OS 17.0</string>
-<key>PKShowFakeRemoteCredentials</key><true/>
+Si tu es sur un build iOS différent du nôtre, tu dois signer TON passd spécifique. Voir [SETUP_MANUAL.md](SETUP_MANUAL.md) (à créer).
+
+Résumé :
+1. Pull TON `/System/Library/PrivateFrameworks/PassKitCore.framework/passd`
+2. Extract entitlements, prep (strip seatbelt, add `platform-application` + `get-task-allow`)
+3. arm64e → arm64 patch (byte@offset 8 = 0)
+4. `ldid -S` then `ct_bypass_linux` (ou `fastPathSign` on-device)
+5. Deploy to `/var/jb/System/Library/SysBins/PassKitCore.framework/passd`
+6. Override plist to `/var/jb/Library/LaunchDaemons/com.apple.passd.plist`
+7. Write PassKit preferences (les 8 clés listed ci-dessous)
+8. Reload launchd + reboot + re-JB
+
+## Si safe mode après setup Apple Pay
+
+```bash
+# Via SSH (iPhone doit booter quand même, safe mode permet SSH)
+sudo bash /var/jb/opt/watchpair11/rollback-applepay.sh
+
+# Reboot iPhone + Re-JB
 ```
 
-`PKShowFakeRemoteCredentials` est le dernier ingrédient qui fait que la carte apparaît comme validée côté Watch.
+Le rollback restaure passd native + efface les override plists + restore tes anciennes PassKit prefs depuis backup auto.
 
-### Étape 5 : Reboot + re-JB
+## PassKit preferences (les 8 clés magiques)
 
-Obligatoire pour clean les caches AMFI/launchd. Après reboot + re-JB :
-1. Open app Watch → Wallet et Apple Pay → Ajouter carte
-2. Flow complet avec validation banque (Desjardins/etc.)
-3. Carte activée sur Watch
+Le script les écrit automatiquement dans `/var/mobile/Library/Preferences/com.apple.passd.plist` :
+
+| Clé | Valeur | Effet |
+|-----|--------|-------|
+| `PKIsUserPropertyOverrideEnabled` | true | Active les overrides PassKit |
+| `PKBypassCertValidation` | true | Skip validation certs Apple |
+| `PKBypassStockholmRegionCheck` | true | Skip region check (Stockholm = Apple Pay codename) |
+| `PKBypassImmoTokenCountCheck` | true | Skip immobilier token count |
+| `PKDeveloperLoggingEnabled` | true | Logs détaillés |
+| `PKClientHTTPHeaderHardwarePlatformOverride` | iPhone15,3 | Header spoof platform |
+| `PKClientHTTPHeaderOSPartOverride` | iPhone OS 17.0 | Header spoof OS |
+| `PKShowFakeRemoteCredentials` | true | **Last ingredient** — Watch affiche carte comme validée |
 
 ## Credits / Remerciements
 
-Ce projet n'aurait pas été possible sans le travail de :
-
-- **[577fkj/WatchFix](https://github.com/577fkj/WatchFix)** (GPLv3) : Source d'inspiration pour les hooks `APSSupport`, `AppsSupport`, `IDSUTun`.
-- **[opa334/ChOma](https://github.com/opa334/ChOma)** (MIT) : Bibliothèque de parsing Mach-O + exploit CoreTrust CVE-2023-41991. Nous avons porté `ct_bypass` vers Linux/WSL avec **support arm64e** (contribution originale, voir ci-dessous).
-- **[opa334/TrollStore](https://github.com/opa334/TrollStore)** : Source de `fastPathSign` + pattern d'injection.
-- **[verygenericname/nathanlr](https://github.com/verygenericname/nathanlr)** : Le jailbreak semi-tethered qui rend tout ce projet possible sur iOS 16.5.1 - 16.7.x A15/A16.
-- **[verygenericname/nathanlr_hooks](https://github.com/verygenericname/nathanlr_hooks)** : Les hooks `launchd`/`generalhook`/`xpcproxy` pour l'injection dans SysBins.
-- **[SerotoninApp/Serotonin](https://github.com/SerotoninApp/Serotonin)** : Base de `launchdhook`.
-- **[Dopamine / opa334](https://github.com/opa334/Dopamine)** : Référence pour `systemhook`.
-- **Legizmo Moonstone (lunotech11)** : Référence commerciale, approche technique et classes cibles.
+- **[577fkj/WatchFix](https://github.com/577fkj/WatchFix)** (GPLv3) : Source pour hooks APSSupport/AppsSupport/IDSUTun
+- **[opa334/ChOma](https://github.com/opa334/ChOma)** (MIT) : Mach-O parsing + CoreTrust CVE-2023-41991. **Nous avons porté `ct_bypass` Linux avec support arm64e** (contribution originale)
+- **[opa334/TrollStore](https://github.com/opa334/TrollStore)** : fastPathSign + pattern injection
+- **[verygenericname/nathanlr](https://github.com/verygenericname/nathanlr)** : Le jailbreak sur iOS 16.5.1 - 16.7.x
+- **[verygenericname/nathanlr_hooks](https://github.com/verygenericname/nathanlr_hooks)** : launchdhook / xpcproxyhook
+- **[SerotoninApp/Serotonin](https://github.com/SerotoninApp/Serotonin)** : Base launchdhook
+- **Legizmo Moonstone (lunotech11)** : Référence commerciale
 
 ## Architecture technique
 
-Le tweak injecte dans 5 processus iOS 16 :
+Le tweak WatchPair11.dylib injecte dans 5 processus iOS 16 (via MobileSubstrate filter plist) :
 
-- **SpringBoard** : spoof version iOS 18.5, hook CFPreferences pairing compatibility, PassKit compat
+- **SpringBoard** : spoof iOS 18.5, CFPreferences pairing, PassKit compat
 - **bluetoothd** : BLE drain fix (block NearbyAction type 0x00)
-- **appconduitd** : `AppsSupport` hook (MobileSMS supplemental mapping)
-- **installd** : `MIEmbeddedWatchBundle` version spoof (watchOS 11.9999)
+- **appconduitd** : AppsSupport hook (MobileSMS supplemental mapping)
+- **installd** : MIEmbeddedWatchBundle version spoof (watchOS 11.9999)
 - **passd** (v7.15+ via SysBins) : Apple Pay provisioning hooks + NRDevice productType spoof
 
-Les 2 daemons `apsd` et `identityservicesd` sont **intentionnellement non-injectés** :
-
-- `apsd` : hook APSSupport cassait les push notifs 3rd-party (v7.6 revert)
-- `identityservicesd` : hook IMService causait SIGSEGV dans Logos ctor (v7.4 revert)
+Les daemons `apsd` et `identityservicesd` sont **intentionnellement non-injectés** :
+- `apsd` : cassait push notifs 3rd-party
+- `identityservicesd` : SIGSEGV dans Logos ctor
 
 ## Contribution originale : ct_bypass_linux arm64e support
 
-Le port Linux de ChOma's `ct_bypass` originalement ne supportait que arm64. Nous avons ajouté le support arm64e, nécessaire pour signer les binaires iPhone 14/15 (qui sont arm64e PAC).
+Le port Linux de ChOma's `ct_bypass` supportait originalement seulement arm64. Nous avons ajouté le support arm64e, nécessaire pour signer les binaires iPhone 14/15 (arm64e PAC).
 
-Fix principal dans `ctbypass_artifacts/` :
+Fichiers dans `ctbypass_artifacts/` :
 
-1. **`Host.c`** : Fallback pour Linux cross-compile (sysctlbyname retourne -1 sinon) :
-```c
-if (sysctlbyname("hw.cputype", cputype, &len, NULL, 0) == -1) {
-    *cputype = 0x100000c;  // CPU_TYPE_ARM64
-    *cpusubtype = 2;       // CPU_SUBTYPE_ARM64E
-    return 0;
-}
-```
-
-2. **`main_linux.c`** : Include missing `Host.h` (sans ça, return pointer truncated 64→32 bit → segfault) :
-```c
-#include "Host.h"
-```
-
-Le ct_bypass_linux résultant peut signer tout binaire iOS arm64 ou arm64e avec TeamID T8ALTGMVXN via CVE-2023-41991, depuis un host Linux sans Mac. Utile pour tout projet qui a besoin de resigner des daemons iOS arm64e.
-
-## Source du ct_bypass_linux
-
-Le sous-dossier `ctbypass_artifacts/` contient :
-
-- `ct_bypass_linux` : binaire Linux x86_64 qui signe des Mach-O iOS arm64/arm64e avec bypass CoreTrust
 - `build_linux_ctbp.sh` : script build
-- `compat_headers/` : shims Apple (mach, mach-o, libkern, CommonCrypto)
-- `coretrust_bug_libplist_patch.c` : version patched de `coretrust_bug.c` utilisant libplist au lieu de CoreFoundation
-- `main_linux.c` : wrapper minimal pour Linux host
-- `prepare_daemon.sh` : pipeline complet (patch arm64 + ldid sign + ct_bypass)
+- `main_linux.c` : wrapper avec fix missing `#include "Host.h"` (sans ça, return pointer truncated 64→32 bit → segfault)
+- `coretrust_bug_libplist_patch.c` : version utilisant libplist au lieu de CoreFoundation
+- `compat_headers/` : shims Apple (mach, mach-o, libkern, CommonCrypto, sys/sysctl)
+- Host.c fallback (patched inline dans build) pour Linux cross-compile :
+  ```c
+  if (sysctlbyname("hw.cputype", ...) == -1) {
+      *cputype = 0x100000c;   // CPU_TYPE_ARM64
+      *cpusubtype = 2;        // CPU_SUBTYPE_ARM64E
+      return 0;
+  }
+  ```
+
+Le `ct_bypass_linux` résultant peut signer tout binaire iOS arm64/arm64e avec TeamID T8ALTGMVXN via CVE-2023-41991 depuis un host Linux sans Mac.
 
 ## Changelog
 
-- **v7.15** (actuel) : **🏆 Apple Pay Watch provisioning works !** Combinaison de :
-  - Hooks `NPKIsConnectedToPairedOrPairingDeviceFromService`, `NPKIsCurrentlyPairing`, et 3 autres NPK C gates dans passd
-  - Hook `PKProductTypeFromNRDevice` via MSHookFunction (productType Watch6,14)
-  - NSUserDefaults overrides native Apple PassKit (PKBypassStockholmRegionCheck, PKShowFakeRemoteCredentials, etc.)
+- **v7.16** (actuel) : **Scripts automation Apple Pay setup** + cleaner postinst
+  - `scripts/setup-applepay.sh` : script installation Apple Pay avec sanity checks + backup
+  - `scripts/rollback-applepay.sh` : revert complet en cas de problème
+  - Bundled dans `.deb` sous `/var/jb/opt/watchpair11/`
+  - Postinst propose 3 options (auto via env var, manuel, script standalone)
+- **v7.15** : **🏆 Apple Pay Watch provisioning works!** Combinaison :
+  - 5 NPK C gate hooks dans passd
+  - PKProductTypeFromNRDevice MSHookFunction → Watch6,14
+  - PassKit NSUserDefaults overrides (PKShowFakeRemoteCredentials, etc.)
   - ct_bypass_linux arm64e support (contribution originale)
-  - passd SysBins pipeline avec override LaunchDaemon plist
-- **v7.14** : Narrow productType spoof pour éviter break Bridge/SpringBoard launch
-- **v7.13** : Watch productType spoof (Series 10 → Series 8 apparent pour iOS 16 compat)
-- **v7.12** : Listener Darwin notifications dans SpringBoard pour trace Bridge activity
-- **v7.11** : Minimal NPKCompanionAgent hook (canAddSecureElementPass)
-- **v7.10** : Hook posix_spawn dans xpcproxy pour Bridge injection (approche abandonnée)
-- **v7.9** : Surgical NPK hooks dans passd (sans NSUserDefaults aggressive)
+  - passd SysBins pipeline + override LaunchDaemon plist
+- **v7.14** : Narrow productType spoof (avoid break SpringBoard launch)
+- **v7.13** : Watch productType spoof Series 10 → Series 8
+- **v7.12** : Darwin notifications listener dans SpringBoard pour debug Bridge
+- **v7.11** : Minimal NPKCompanionAgent hook
+- **v7.10** : posix_spawn hook xpcproxy (abandonné)
+- **v7.9** : Surgical NPK hooks dans passd
 - **v7.8** : hookPassd dans SpringBoard + Bridge + NPKCompanionAgent
-- **v7.7** : NSUserDefaults PassKit override keys (PKDeveloperSettingsEnabled, PKBypassCertValidation, etc.)
-- **v7.6** : Désactive `hookAPSSupport` (cassait push notifs 3rd-party)
-- **v7.4** : Retire `identityservicesd` du filter (crash Logos ctor)
-- **v7.3** : Integration hooks WatchFix (APSSupport, AppsSupport, IDSUTun)
+- **v7.7** : NSUserDefaults PassKit override keys
+- **v7.6** : Désactive hookAPSSupport (cassait push notifs 3rd-party)
+- **v7.4** : Retire identityservicesd du filter (crash Logos ctor)
+- **v7.3** : Integration hooks WatchFix
 - **v6.9** : Recette initiale validée (SpringBoard + bluetoothd seulement)
+
+## Troubleshooting
+
+### Safe mode après install
+```bash
+sudo mv /var/jb/Library/MobileSubstrate/DynamicLibraries/WatchPair11.dylib{,.disabled}
+sudo mv /var/jb/usr/lib/TweakInject/WatchPair11.dylib{,.disabled}
+sudo reboot
+```
+
+### Safe mode après Apple Pay setup
+```bash
+sudo bash /var/jb/opt/watchpair11/rollback-applepay.sh
+sudo reboot
+```
+
+### Crash logs
+- Path : `/var/mobile/Library/Logs/CrashReporter/*.ips`
+- Via SSH : `ls -lt /var/mobile/Library/Logs/CrashReporter/ | head -10`
+- Via Settings : Privacy & Security → Analytics & Improvements → Analytics Data
+
+### Verify hooks actifs
+```bash
+# Witnesses (confirment dylib load)
+ls -la /var/tmp/wp11_*.txt
+
+# Log en temps réel
+tail -f /var/tmp/wp11.log
+```
+
+### Apple Pay fonctionne pas
+1. Check passd prefs : `cat /var/mobile/Library/Preferences/com.apple.passd.plist` (doit contenir les 8 clés PK*)
+2. Check passd witness : `/var/tmp/wp11_passd.txt` doit exister
+3. Check passd hooks installés : `grep passd /var/tmp/wp11.log | grep Hooked`
+4. Si manque : tu n'as pas fait le setup Apple Pay OU le reboot+re-JB
 
 ## Limitations connues
 
-- Tweak développé sur iPhone 14 Pro Max iOS 16.6 + Apple Watch Series 10 watchOS 11.5. Autres combinaisons non testées.
-- Apple Pay setup (v7.15+) nécessite step-by-step manuel (voir section "Setup Apple Pay"). Pas automatisé via .deb install.
-- Si le Watch ne répond pas physiquement au NFC (terminal de paiement), `PKShowFakeRemoteCredentials` n'a fait qu'un bypass UI. Le SE provisioning réel dépend de la santé du flow Apple Pay, testable seulement à un vrai terminal.
+- Testé **uniquement** sur iPhone 14 Pro Max iOS 16.6 build 20G75 + Apple Watch Series 10 watchOS 11.5
+- Si ton iOS build diffère, le `passd_signed` bundled peut ne pas fonctionner → setup manuel nécessaire
+- Si Watch ne répond pas physiquement au NFC (terminal paiement), `PKShowFakeRemoteCredentials` n'a fait qu'un bypass UI — tester à un vrai terminal
 
 ## Installation depuis les sources
 
 ```bash
 make package
+# → packages/com.watchpair11.tweak_*.deb
 ```
 
 ### Via SSH
@@ -204,4 +247,4 @@ scp -P 8056 packages/*.deb mobile@127.0.0.1:/var/mobile/Documents/
 ssh -p 8056 mobile@127.0.0.1 "echo '<password>' | sudo -S dpkg -i /var/mobile/Documents/com.watchpair11.tweak_*.deb"
 ```
 
-Après l'installation, **rejailbreak** (relancer nathanlr) pour que tous les hooks SysBins soient actifs.
+Après install, **rejailbreak** (relancer nathanlr) pour activer tous les hooks SysBins.

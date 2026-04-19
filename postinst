@@ -1,17 +1,52 @@
 #!/bin/bash
 # WatchPair11 - Post-installation (nathanlr)
+# v7.16: ajoute option auto-setup Apple Pay via WATCHPAIR11_AUTO_APPLEPAY=1
 
+echo "[WP11] Installation terminee"
+echo ""
+
+# Kill daemons pour reload avec nouveau dylib
 echo "[WP11] Kill des daemons Watch pour reload..."
-killall -9 bluetoothd 2>/dev/null || true
-killall -9 companionproxyd 2>/dev/null || true
-killall -9 nptocompaniond 2>/dev/null || true
-killall -9 terminusd 2>/dev/null || true
-killall -9 pairedsyncd 2>/dev/null || true
-killall -9 Bridge 2>/dev/null || true
-killall -9 identityservicesd 2>/dev/null || true
-killall -9 imagent 2>/dev/null || true
-killall -9 apsd 2>/dev/null || true
-killall -9 appconduitd 2>/dev/null || true
-killall -9 passd 2>/dev/null || true
+for d in bluetoothd companionproxyd nptocompaniond terminusd pairedsyncd \
+         Bridge identityservicesd imagent apsd appconduitd passd; do
+    killall -9 "$d" 2>/dev/null || true
+done
 
-echo "[WP11] Done. Respring recommande."
+echo ""
+echo "=========================================="
+echo "[WP11] Configuration Apple Pay (optionnelle)"
+echo "=========================================="
+echo ""
+echo "Ce tweak supporte Apple Pay sur Watch watchOS 11.5 + iOS 16 via un setup"
+echo "supplementaire (passd SysBins + PassKit prefs)."
+echo ""
+echo "DEUX options :"
+echo ""
+echo "  A) AUTO : setup lance maintenant si iOS 16.6 build 20G75"
+echo "     export WATCHPAIR11_AUTO_APPLEPAY=1 puis reinstalle le .deb"
+echo ""
+echo "  B) MANUEL (recommande) : lance plus tard quand tu es pret"
+echo "     sudo bash /var/jb/opt/watchpair11/setup-applepay.sh"
+echo ""
+echo "Si Apple Pay setup casse ton device (safe mode, crashes) :"
+echo "     sudo bash /var/jb/opt/watchpair11/rollback-applepay.sh"
+echo ""
+
+# Auto-setup si variable d'env activee
+if [ "${WATCHPAIR11_AUTO_APPLEPAY:-0}" = "1" ]; then
+    echo "[WP11] WATCHPAIR11_AUTO_APPLEPAY=1 detecte -- lancement setup auto..."
+    echo "[WP11] 5s pour annuler (Ctrl+C)..."
+    sleep 5
+    if [ -f /var/jb/opt/watchpair11/setup-applepay.sh ]; then
+        bash /var/jb/opt/watchpair11/setup-applepay.sh || {
+            echo "[WP11] Setup Apple Pay a echoue. Use rollback-applepay.sh si probleme."
+        }
+    else
+        echo "[WP11] setup-applepay.sh non trouve -- skip."
+    fi
+else
+    echo "[WP11] Setup Apple Pay saute (par defaut). Lance manuellement quand pret."
+fi
+
+echo ""
+echo "[WP11] REBOOT + Re-JB (nathanlr) recommande pour activer tous les hooks."

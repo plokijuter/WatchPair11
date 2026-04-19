@@ -19,3 +19,4 @@ layout/
 
 # Device backups (large tarballs, not source)
 backups/
+/layout/opt/watchpair11/passd_signed
