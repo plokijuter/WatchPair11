@@ -2,19 +2,25 @@
 
 ## 📦 Install (Cydia / Sileo / Zebra)
 
-**Repo URL** : `https://plokijuter.github.io/WatchPair11/`
+### ⭐ Easiest path : open the install page on your iOS device
 
-> ⚠️ The trailing **`/`** is required. Without it, Sileo will fetch `Release` from the wrong path and show `Release returned status 404`.
+# 👉 [**plokijuter.github.io/WatchPair11/**](https://plokijuter.github.io/WatchPair11/) 👈
 
-One-tap install (open these on your iOS device) :
+The landing page has working one-tap **Add to Cydia / Sileo / Zebra** buttons. (GitHub's README strips out `cydia://` / `sileo://` / `zbra://` URL schemes for security, so badges placed directly here would not actually launch the app.)
 
-| | | |
-|---|---|---|
-| [![Add to Cydia](https://img.shields.io/badge/Add_to-Cydia-993333?style=for-the-badge&logo=apple)](cydia://url/https://cydia.saurik.com/api/share#?source=https://plokijuter.github.io/WatchPair11/) | [![Add to Sileo](https://img.shields.io/badge/Add_to-Sileo-3873b3?style=for-the-badge&logo=apple)](sileo://source/https://plokijuter.github.io/WatchPair11/) | [![Add to Zebra](https://img.shields.io/badge/Add_to-Zebra-d29922?style=for-the-badge&logo=apple)](zbra://sources/add/https://plokijuter.github.io/WatchPair11/) |
+### Manual add (if the buttons don't trigger the app)
 
-Or visit the landing page : **[plokijuter.github.io/WatchPair11](https://plokijuter.github.io/WatchPair11/)**
+In your package manager → **Sources** → **Add** → paste this URL **with the trailing `/`** :
 
-Direct `.deb` downloads : [latest release](https://github.com/plokijuter/WatchPair11/releases/latest)
+```
+https://plokijuter.github.io/WatchPair11/
+```
+
+> ⚠️ The trailing **`/`** is **required**. Without it, Sileo strips the path back to `https://plokijuter.github.io/` and tries to fetch `Release` and `Packages` from there → both return **404**.
+
+### Direct `.deb` (no repo, manual install)
+
+[Download the latest release](https://github.com/plokijuter/WatchPair11/releases/latest) → `dpkg -i com.watchpair11.tweak_*.deb` over SSH, or use Filza / dpkg / Sileo "Install Package".
 
 ---
 
