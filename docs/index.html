@@ -107,9 +107,12 @@
   <p class="tagline">Pair watchOS 11.5 (Series 10+) with iOS 16 — with native Apple Pay.</p>
 
   <div class="repo-url" onclick="navigator.clipboard?.writeText(this.dataset.url)" data-url="https://plokijuter.github.io/WatchPair11/">
-    <span class="label">Repo URL (tap to copy)</span>
+    <span class="label">Repo URL (tap to copy) — trailing slash REQUIRED</span>
     https://plokijuter.github.io/WatchPair11/
   </div>
+  <p style="color: var(--orange); font-size: 13px; margin-bottom: 24px; padding: 10px 12px; background: rgba(210, 153, 34, 0.1); border-radius: 6px; border-left: 3px solid var(--orange);">
+    ⚠️ <strong>Always include the trailing <code>/</code></strong>. Without it, Sileo fetches <code>Release</code> from the wrong path and fails with <code>Release returned status 404</code>.
+  </p>
 
   <div class="section">
     <h2>One-tap install (open on iOS device)</h2>

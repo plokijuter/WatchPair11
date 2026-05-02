@@ -4,6 +4,8 @@
 
 **Repo URL** : `https://plokijuter.github.io/WatchPair11/`
 
+> ⚠️ The trailing **`/`** is required. Without it, Sileo will fetch `Release` from the wrong path and show `Release returned status 404`.
+
 One-tap install (open these on your iOS device) :
 
 | | | |
