@@ -1,5 +1,21 @@
 # WatchPair11
 
+## 📦 Install (Cydia / Sileo / Zebra)
+
+**Repo URL** : `https://plokijuter.github.io/WatchPair11/`
+
+One-tap install (open these on your iOS device) :
+
+| | | |
+|---|---|---|
+| [![Add to Cydia](https://img.shields.io/badge/Add_to-Cydia-993333?style=for-the-badge&logo=apple)](cydia://url/https://cydia.saurik.com/api/share#?source=https://plokijuter.github.io/WatchPair11/) | [![Add to Sileo](https://img.shields.io/badge/Add_to-Sileo-3873b3?style=for-the-badge&logo=apple)](sileo://source/https://plokijuter.github.io/WatchPair11/) | [![Add to Zebra](https://img.shields.io/badge/Add_to-Zebra-d29922?style=for-the-badge&logo=apple)](zbra://sources/add/https://plokijuter.github.io/WatchPair11/) |
+
+Or visit the landing page : **[plokijuter.github.io/WatchPair11](https://plokijuter.github.io/WatchPair11/)**
+
+Direct `.deb` downloads : [latest release](https://github.com/plokijuter/WatchPair11/releases/latest)
+
+---
+
 ## Description
 
 WatchPair11 est un tweak iOS pour [nathanlr](https://github.com/verygenericname/nathanlr) (iOS 16.6) qui permet de jumeler une Apple Watch **watchOS 11.5** (Series 10+) avec un iPhone **iOS 16** (iPhone 14/15 arm64e). Bypass NanoRegistry + MobileAsset + CFPreferences + **Apple Pay provisioning** (v7.15+).
