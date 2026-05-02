@@ -233,12 +233,17 @@ static NSString *const kSudoBin = @"/var/jb/basebins/sudo_spawn_root";
         }
         L(@"  ✓ passd + override plist deployed");
 
-        L(@"[Step 4/5] Writing PassKit preferences (8 keys)...");
-        // Use plutil if available, otherwise fallback
+        L(@"[Step 4/5] Writing PassKit preferences (v7.17 — fixed keys per issue #2)...");
+        // v7.17 — fix issue #2 (credit @577fkj). Real CFPreferences/NSUserDefaults keys differ from
+        // exported NSString * symbol names :
+        //   PKIsUserPropertyOverrideEnabled  → PKIsUserPropertyOverrideEnabledKey
+        //   PKDeveloperLoggingEnabled        → PKDeveloperLogging
+        //   PKShowFakeRemoteCredentials      → PKShowFakeRemoteCredentialsKey
+        // Both legacy + correct keys are written for safety.
         NSString *cmd4 =
           @"PREFS=/var/mobile/Library/Preferences/com.apple.passd.plist; "
            "if command -v plutil >/dev/null 2>&1 && [ -f \"$PREFS\" ]; then "
-           "  for k in PKIsUserPropertyOverrideEnabled PKBypassCertValidation PKBypassStockholmRegionCheck PKBypassImmoTokenCountCheck PKDeveloperLoggingEnabled PKShowFakeRemoteCredentials; do "
+           "  for k in PKIsUserPropertyOverrideEnabled PKIsUserPropertyOverrideEnabledKey PKBypassCertValidation PKBypassStockholmRegionCheck PKBypassImmoTokenCountCheck PKDeveloperLoggingEnabled PKDeveloperLogging PKShowFakeRemoteCredentials PKShowFakeRemoteCredentialsKey; do "
            "    plutil -replace \"$k\" -bool true \"$PREFS\" 2>/dev/null || true; "
            "  done; "
            "  plutil -replace PKClientHTTPHeaderHardwarePlatformOverride -string 'iPhone15,3' \"$PREFS\" 2>/dev/null || true; "
@@ -251,11 +256,14 @@ static NSString *const kSudoBin = @"/var/jb/basebins/sudo_spawn_root";
            "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
            "<plist version=\"1.0\"><dict>"
            "<key>PKIsUserPropertyOverrideEnabled</key><true/>"
+           "<key>PKIsUserPropertyOverrideEnabledKey</key><true/>"
            "<key>PKBypassCertValidation</key><true/>"
            "<key>PKBypassStockholmRegionCheck</key><true/>"
            "<key>PKBypassImmoTokenCountCheck</key><true/>"
            "<key>PKDeveloperLoggingEnabled</key><true/>"
+           "<key>PKDeveloperLogging</key><true/>"
            "<key>PKShowFakeRemoteCredentials</key><true/>"
+           "<key>PKShowFakeRemoteCredentialsKey</key><true/>"
            "<key>PKClientHTTPHeaderHardwarePlatformOverride</key><string>iPhone15,3</string>"
            "<key>PKClientHTTPHeaderOSPartOverride</key><string>iPhone OS 17.0</string>"
            "</dict></plist>\n"
@@ -307,7 +315,7 @@ static NSString *const kSudoBin = @"/var/jb/basebins/sudo_spawn_root";
            "  chown mobile:mobile /var/mobile/Library/Preferences/com.apple.passd.plist; "
            "  echo 'PassKit prefs restored from backup'; "
            "else "
-           "  for k in PKIsUserPropertyOverrideEnabled PKBypassCertValidation PKBypassStockholmRegionCheck PKBypassImmoTokenCountCheck PKDeveloperLoggingEnabled PKShowFakeRemoteCredentials PKClientHTTPHeaderHardwarePlatformOverride PKClientHTTPHeaderOSPartOverride; do "
+           "  for k in PKIsUserPropertyOverrideEnabled PKIsUserPropertyOverrideEnabledKey PKBypassCertValidation PKBypassStockholmRegionCheck PKBypassImmoTokenCountCheck PKDeveloperLoggingEnabled PKDeveloperLogging PKShowFakeRemoteCredentials PKShowFakeRemoteCredentialsKey PKClientHTTPHeaderHardwarePlatformOverride PKClientHTTPHeaderOSPartOverride; do "
            "    plutil -remove \"$k\" /var/mobile/Library/Preferences/com.apple.passd.plist 2>/dev/null || true; "
            "  done; "
            "  echo 'PassKit override keys removed'; "

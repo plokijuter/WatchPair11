@@ -10,6 +10,9 @@ packages/
 bulletindistributord
 companionmessagesd
 
+# Allow packaged .deb in the public APT repo (GitHub Pages)
+!docs/debs/*.deb
+
 # Reference/third-party binaries
 generalhook_original.dylib
 layout/

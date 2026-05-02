@@ -33,7 +33,7 @@ warn(){ echo -e "${Y}[WARN]${N} $1"; }
 # =============================================================================
 # SANITY CHECKS
 # =============================================================================
-log "WatchPair11 Apple Pay Setup v7.16"
+log "WatchPair11 Apple Pay Setup v7.17"
 log "======================================"
 echo ""
 
@@ -104,19 +104,27 @@ log "Step 4/5 — Writing PassKit preferences to $PASSKIT_PREFS"
 # We'll use /var/jb/usr/bin/plutil if available, otherwise write binary plist via perl
 
 PREFS_TEMP="/tmp/wp11_passd_prefs.plist"
+# v7.17 — fix issue #2 (credit @577fkj) : real CFPreferences/NSUserDefaults keys differ from Apple's exported symbol names.
+#   PKIsUserPropertyOverrideEnabled  → PKIsUserPropertyOverrideEnabledKey
+#   PKDeveloperLoggingEnabled        → PKDeveloperLogging
+#   PKShowFakeRemoteCredentials      → PKShowFakeRemoteCredentialsKey
+# Both legacy + correct keys are written (additive) for safety.
 cat > "$PREFS_TEMP" <<'XMLEOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>PKIsUserPropertyOverrideEnabled</key><true/>
+    <key>PKIsUserPropertyOverrideEnabledKey</key><true/>
     <key>PKBypassCertValidation</key><true/>
     <key>PKBypassStockholmRegionCheck</key><true/>
     <key>PKBypassImmoTokenCountCheck</key><true/>
     <key>PKDeveloperLoggingEnabled</key><true/>
+    <key>PKDeveloperLogging</key><true/>
     <key>PKClientHTTPHeaderHardwarePlatformOverride</key><string>iPhone15,3</string>
     <key>PKClientHTTPHeaderOSPartOverride</key><string>iPhone OS 17.0</string>
     <key>PKShowFakeRemoteCredentials</key><true/>
+    <key>PKShowFakeRemoteCredentialsKey</key><true/>
 </dict>
 </plist>
 XMLEOF
@@ -124,8 +132,11 @@ XMLEOF
 # Merge with existing prefs (preserve existing keys)
 if [ -f "$PASSKIT_PREFS" ] && command -v plutil >/dev/null 2>&1; then
   # plutil-based merge (iOS native)
-  for KEY in PKIsUserPropertyOverrideEnabled PKBypassCertValidation PKBypassStockholmRegionCheck \
-             PKBypassImmoTokenCountCheck PKDeveloperLoggingEnabled PKShowFakeRemoteCredentials; do
+  for KEY in PKIsUserPropertyOverrideEnabled PKIsUserPropertyOverrideEnabledKey \
+             PKBypassCertValidation PKBypassStockholmRegionCheck \
+             PKBypassImmoTokenCountCheck \
+             PKDeveloperLoggingEnabled PKDeveloperLogging \
+             PKShowFakeRemoteCredentials PKShowFakeRemoteCredentialsKey; do
     plutil -replace "$KEY" -bool true "$PASSKIT_PREFS" 2>/dev/null || true
   done
   plutil -replace PKClientHTTPHeaderHardwarePlatformOverride -string "iPhone15,3" "$PASSKIT_PREFS" 2>/dev/null || true

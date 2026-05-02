@@ -1,0 +1,8 @@
+Origin: WatchPair11
+Label: WatchPair11 Repo
+Suite: stable
+Version: 1.0
+Codename: watchpair11
+Architectures: iphoneos-arm64
+Components: main
+Description: Tweak iOS 16.6 + watchOS 11.5 pairing with native Apple Pay support

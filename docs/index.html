@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WatchPair11 Repo</title>
+<meta name="description" content="watchOS 11.5 pairing with iOS 16 + native Apple Pay. Add this repo to Cydia, Sileo, or Zebra.">
+<style>
+  :root {
+    --bg: #0d1117;
+    --card: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #7d8590;
+    --accent: #2f81f7;
+    --green: #2ea043;
+    --orange: #d29922;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 24px 16px;
+    min-height: 100vh;
+  }
+  .container { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 28px; margin-bottom: 8px; }
+  .tagline { color: var(--muted); margin-bottom: 24px; font-size: 16px; }
+  .repo-url {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    font-family: 'SF Mono', Menlo, monospace;
+    font-size: 14px;
+    margin-bottom: 24px;
+    word-break: break-all;
+    user-select: all;
+    cursor: copy;
+  }
+  .repo-url:active { background: #21262d; }
+  .repo-url .label { color: var(--muted); display: block; margin-bottom: 6px; font-family: -apple-system, sans-serif; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .buttons { display: grid; gap: 12px; margin-bottom: 32px; }
+  .btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 14px 20px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--text);
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 16px;
+    transition: transform 0.1s, background 0.15s;
+  }
+  .btn:active { transform: scale(0.98); }
+  .btn:hover { background: #21262d; }
+  .btn .icon { font-size: 22px; }
+  .btn-cydia { border-left: 4px solid #993333; }
+  .btn-sileo { border-left: 4px solid #3873b3; }
+  .btn-zebra { border-left: 4px solid var(--orange); }
+  .section { margin-bottom: 28px; }
+  .section h2 { font-size: 18px; margin-bottom: 12px; color: var(--text); }
+  .pkg-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+  .pkg-card h3 { font-size: 16px; margin-bottom: 4px; }
+  .pkg-card .ver { color: var(--accent); font-family: 'SF Mono', Menlo, monospace; font-size: 13px; }
+  .pkg-card p { color: var(--muted); font-size: 14px; margin-top: 8px; }
+  .pkg-card a { color: var(--accent); text-decoration: none; font-size: 14px; }
+  .pkg-card a:hover { text-decoration: underline; }
+  .footer {
+    margin-top: 40px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 13px;
+    text-align: center;
+  }
+  .footer a { color: var(--accent); text-decoration: none; }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    background: var(--green);
+    color: white;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <h1>WatchPair11 Repo <span class="badge">v7.17</span></h1>
+  <p class="tagline">Pair watchOS 11.5 (Series 10+) with iOS 16 — with native Apple Pay.</p>
+
+  <div class="repo-url" onclick="navigator.clipboard?.writeText(this.dataset.url)" data-url="https://plokijuter.github.io/WatchPair11/">
+    <span class="label">Repo URL (tap to copy)</span>
+    https://plokijuter.github.io/WatchPair11/
+  </div>
+
+  <div class="section">
+    <h2>One-tap install (open on iOS device)</h2>
+    <div class="buttons">
+      <a class="btn btn-cydia" href="cydia://url/https://cydia.saurik.com/api/share#?source=https://plokijuter.github.io/WatchPair11/">
+        <span class="icon">📦</span> Add to Cydia
+      </a>
+      <a class="btn btn-sileo" href="sileo://source/https://plokijuter.github.io/WatchPair11/">
+        <span class="icon">🌀</span> Add to Sileo
+      </a>
+      <a class="btn btn-zebra" href="zbra://sources/add/https://plokijuter.github.io/WatchPair11/">
+        <span class="icon">🦓</span> Add to Zebra
+      </a>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Packages</h2>
+
+    <div class="pkg-card">
+      <h3>WatchPair11 <span class="ver">7.17-1</span></h3>
+      <p>Tweak. Pairing iOS 16.6 ↔ watchOS 11.5 (NanoRegistry + MobileAsset + CFPreferences hooks). v7.17 fix : real PassKit pref keys (issue #2).</p>
+      <a href="debs/com.watchpair11.tweak_7.17-1_iphoneos-arm64.deb">↓ Download .deb</a>
+    </div>
+
+    <div class="pkg-card">
+      <h3>WatchPair11 Installer <span class="ver">1.1-1</span></h3>
+      <p>Home-screen app, one-tap setup. Embeds tweak + Apple Pay setup + rollback. No SSH required.</p>
+      <a href="debs/com.watchpair11.installer_1.1-1_iphoneos-arm64.deb">↓ Download .deb</a>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Manual install</h2>
+    <p style="color: var(--muted); font-size: 14px;">In your package manager → <strong>Sources</strong> → <strong>Add</strong> → paste the URL above.</p>
+  </div>
+
+  <div class="footer">
+    <p><a href="https://github.com/plokijuter/WatchPair11">GitHub repo</a> · <a href="https://github.com/plokijuter/WatchPair11/releases">Releases</a> · <a href="https://github.com/plokijuter/WatchPair11/issues">Issues</a></p>
+    <p style="margin-top: 8px;">Requires nathanlr jailbreak on iOS 16.5.1–16.7.x · iPhone 14/15 (arm64e)</p>
+  </div>
+
+</div>
+</body>
+</html>

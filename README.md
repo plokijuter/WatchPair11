@@ -123,24 +123,33 @@ sudo bash /var/jb/opt/watchpair11/rollback-applepay.sh
 
 Le rollback restaure passd native + efface les override plists + restore tes anciennes PassKit prefs depuis backup auto.
 
-## PassKit preferences (les 8 clés magiques)
+## PassKit preferences (clés magiques)
 
-Le script les écrit automatiquement dans `/var/mobile/Library/Preferences/com.apple.passd.plist` :
+Le script les écrit automatiquement dans `/var/mobile/Library/Preferences/com.apple.passd.plist`.
 
-| Clé | Valeur | Effet |
-|-----|--------|-------|
-| `PKIsUserPropertyOverrideEnabled` | true | Active les overrides PassKit |
+> **v7.17 fix** ([issue #2](https://github.com/plokijuter/WatchPair11/issues/2), credit [@577fkj](https://github.com/577fkj))
+> Trois clés CFPreferences/NSUserDefaults divergent du nom du symbole `extern NSString * const` exporté par PassKitCore. Le script écrit désormais **les deux versions** (legacy + corrigée) :
+> - `PKIsUserPropertyOverrideEnabled` → en réalité `PKIsUserPropertyOverrideEnabledKey`
+> - `PKDeveloperLoggingEnabled` → en réalité `PKDeveloperLogging`
+> - `PKShowFakeRemoteCredentials` → en réalité `PKShowFakeRemoteCredentialsKey`
+>
+> Note : `PKIsUserPropertyOverrideEnabled` et `PKShowFakeRemoteCredentials` sont en plus gatés par `os_variant_has_internal_ui_6("com.apple.wallet")` — sur build retail, ces deux fonctions retournent toujours `false` même avec la bonne clé. Voir issue #2 pour les screenshots de désassemblage.
+
+| Clé (corrigée) | Valeur | Effet |
+|----------------|--------|-------|
+| `PKIsUserPropertyOverrideEnabledKey` | true | Master gate des overrides PassKit (gated `internal_ui`) |
 | `PKBypassCertValidation` | true | Skip validation certs Apple |
 | `PKBypassStockholmRegionCheck` | true | Skip region check (Stockholm = Apple Pay codename) |
 | `PKBypassImmoTokenCountCheck` | true | Skip immobilier token count |
-| `PKDeveloperLoggingEnabled` | true | Logs détaillés |
+| `PKDeveloperLogging` | true | Logs détaillés |
 | `PKClientHTTPHeaderHardwarePlatformOverride` | iPhone15,3 | Header spoof platform |
 | `PKClientHTTPHeaderOSPartOverride` | iPhone OS 17.0 | Header spoof OS |
-| `PKShowFakeRemoteCredentials` | true | **Last ingredient** — Watch affiche carte comme validée |
+| `PKShowFakeRemoteCredentialsKey` | true | Watch affiche carte comme validée (gated `internal_ui`) |
 
 ## Credits / Remerciements
 
 - **[577fkj/WatchFix](https://github.com/577fkj/WatchFix)** (GPLv3) : Source pour hooks APSSupport/AppsSupport/IDSUTun
+- **[@577fkj](https://github.com/577fkj)** : Reverse engineering [issue #2](https://github.com/plokijuter/WatchPair11/issues/2) — identification des vraies clés CFPreferences PassKit (v7.17 fix)
 - **[opa334/ChOma](https://github.com/opa334/ChOma)** (MIT) : Mach-O parsing + CoreTrust CVE-2023-41991. **Nous avons porté `ct_bypass` Linux avec support arm64e** (contribution originale)
 - **[opa334/TrollStore](https://github.com/opa334/TrollStore)** : fastPathSign + pattern injection
 - **[verygenericname/nathanlr](https://github.com/verygenericname/nathanlr)** : Le jailbreak sur iOS 16.5.1 - 16.7.x
@@ -185,7 +194,12 @@ Le `ct_bypass_linux` résultant peut signer tout binaire iOS arm64/arm64e avec T
 
 ## Changelog
 
-- **v7.16 + installer app** (actuel) : **Home-screen installer app** one-tap setup
+- **v7.17** (actuel) : **Fix clés PassKit** ([issue #2](https://github.com/plokijuter/WatchPair11/issues/2), credit [@577fkj](https://github.com/577fkj))
+  - 3 clés CFPreferences/NSUserDefaults corrigées : `PKIsUserPropertyOverrideEnabledKey`, `PKDeveloperLogging`, `PKShowFakeRemoteCredentialsKey`
+  - Écriture **additive** : legacy + corrigé (zéro risque de régression)
+  - Documentation du gate `os_variant_has_internal_ui_6("com.apple.wallet")` qui bloque 2 des 3 fonctions sur builds retail
+  - Setup install repo Cydia/Sileo/Zebra : `https://plokijuter.github.io/WatchPair11/`
+- **v7.16 + installer app** : **Home-screen installer app** one-tap setup
   - `installer-app/` : app iOS autonome (Theos application_modern, UIKit)
   - Embed toutes les ressources (`WatchPair11.dylib`, `passd_signed`, overrides, prefs)
   - 3 boutons : Install Tweak / Install Apple Pay / Rollback — aucun SSH requis

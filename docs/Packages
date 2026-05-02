@@ -1,0 +1,34 @@
+Package: com.watchpair11.installer
+Version: 1.1-1
+Architecture: iphoneos-arm64
+Maintainer: plokijuter <plokijuter@hotmail.com>
+Installed-Size: 7540
+Depends: mobilesubstrate, preferenceloader
+Filename: debs/com.watchpair11.installer_1.1-1_iphoneos-arm64.deb
+Size: 1781094
+MD5sum: d8369f34af46349ae26c53b3a9296576
+SHA1: 96d417aa27fed650cd4b47711a9892ea5e327681
+SHA256: b514948d78bf01a186ed5b2a76cca111c102f138409414ab506c0744ef77302c
+Section: Applications
+Description: Home-screen installer for WatchPair11 tweak + Apple Pay. One-tap setup for pairing watchOS 11.5 with iOS 16. Includes auto-rollback.
+Author: plokijuter
+Depfile: 7.17
+Installprefix: /
+Name: WatchPair11 Installer
+
+Package: com.watchpair11.tweak
+Version: 7.17-1
+Architecture: iphoneos-arm64
+Maintainer: plokijuter
+Installed-Size: 7264
+Depends: mobilesubstrate (>= 0.9.5000), firmware (>= 15.0)
+Filename: debs/com.watchpair11.tweak_7.17-1_iphoneos-arm64.deb
+Size: 1743212
+MD5sum: 8fc88907bb9d1f4286acbf4783448f29
+SHA1: c291d0d0f2195ba749962a4f1d082345ac1e6014
+SHA256: 4f7c43944bab83f8bfc506907eae014a576968d977d6557f22d3663d03349b76
+Section: Tweaks
+Description: Permet le pairing d'une Apple Watch watchOS 11.5 avec iOS 16 (nathanlr). Bypass NanoRegistry + MobileAsset + CFPreferences flush.
+Author: plokijuter
+Name: WatchPair11
+
