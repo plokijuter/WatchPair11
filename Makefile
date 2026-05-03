@@ -11,6 +11,10 @@
 
 export THEOS ?= $(HOME)/theos
 
+# CRITICAL: tells Theos to prefix all installed paths with /var/jb/ (rootless layout).
+# Without this, dpkg tries to install into /Applications/ which is read-only on iOS 16.
+THEOS_PACKAGE_SCHEME = rootless
+
 INSTALL_TARGET_PROCESSES = SpringBoard
 ARCHS = arm64 arm64e
 
