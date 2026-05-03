@@ -1,0 +1,12 @@
+Package: com.watchpair11.roothide
+Name: WatchPair11 (roothide)
+Version: 7.19-1
+Architecture: iphoneos-arm64
+Description: Pair Apple Watch watchOS 11.5 (Series 10+) with iPhone iOS 16.6 — roothide variant. Includes optional native Apple Pay setup. Home-screen app for one-tap Apple Pay setup + rollback.
+Maintainer: plokijuter
+Author: plokijuter
+Section: Tweaks
+Depends: ellekit | mobilesubstrate, firmware (>= 15.0)
+Replaces: com.watchpair11 (<< 7.19), com.watchpair11.tweak (<< 7.19), com.watchpair11.installer (<< 7.19)
+Conflicts: com.watchpair11 (<< 7.19), com.watchpair11.tweak (<< 7.19), com.watchpair11.installer (<< 7.19)
+Provides: com.watchpair11.tweak, com.watchpair11.installer

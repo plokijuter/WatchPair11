@@ -1,6 +1,17 @@
 #!/bin/bash
-# WatchPair11 v7.18 — Post-install
+# WatchPair11 v7.19 — Post-install (rootless / nathanlr variant)
 # Single .deb : registers the home-screen app + reloads daemons for tweak hooks.
+
+set -e
+
+JB_PREFIX="/var/jb"
+
+# Substitute the __JBROOT__ placeholder in the LaunchDaemon plist template so
+# that the file on disk is coherent even before setup-applepay.sh runs.
+TEMPLATE="${JB_PREFIX}/opt/watchpair11/com.apple.passd.plist"
+if [ -f "$TEMPLATE" ]; then
+  sed -i "s|__JBROOT__|${JB_PREFIX}|g" "$TEMPLATE"
+fi
 
 echo "[WP11] Registering home-screen app..."
 if [ -x /var/jb/usr/bin/uicache ]; then
@@ -17,7 +28,7 @@ done
 
 cat <<'EOF'
 [WP11] ==========================================
-[WP11] WatchPair11 v7.18 installed.
+[WP11] WatchPair11 v7.19 installed.
 [WP11]
 [WP11] Open the WatchPair11 app on the home screen
 [WP11] for Apple Pay setup, rollback, respring, and

@@ -4,18 +4,7 @@
 
 set -e
 
-# Auto-detect rootless vs roothide (same logic as setup-applepay.sh)
-if command -v jbroot >/dev/null 2>&1; then
-  JB_PREFIX="$(jbroot)"
-  JB_FLAVOR="roothide"
-elif [ -d /var/jb ]; then
-  JB_PREFIX="/var/jb"
-  JB_FLAVOR="rootless"
-else
-  echo "[ERR] Neither roothide (jbroot tool) nor nathanlr (/var/jb) detected." >&2
-  exit 1
-fi
-
+JB_PREFIX="/var/jb"
 BUNDLE_DIR="$JB_PREFIX/opt/watchpair11"
 BACKUP_DIR="$BUNDLE_DIR/backup"
 SYSBINS_DIR="$JB_PREFIX/System/Library/SysBins/PassKitCore.framework"
@@ -33,7 +22,6 @@ err() { echo -e "${R}[ERR]${N}  $1" >&2; }
 
 log "WatchPair11 Apple Pay Rollback"
 log "==============================="
-log "Jailbreak flavor : $JB_FLAVOR (prefix: $JB_PREFIX)"
 echo ""
 
 if [ "$EUID" -ne 0 ]; then
@@ -41,15 +29,11 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-# Remove passd SysBins overlay (rootless only)
-if [ "$JB_FLAVOR" = "rootless" ]; then
-  log "Removing passd SysBins overlay"
-  if [ -d "$SYSBINS_DIR" ]; then
-    rm -rf "$SYSBINS_DIR"
-    ok "Removed $SYSBINS_DIR"
-  fi
-else
-  log "Roothide: no SysBins overlay to remove (passd_signed stays in $BUNDLE_DIR)"
+# Remove passd SysBins injection
+log "Removing passd SysBins"
+if [ -d "$SYSBINS_DIR" ]; then
+  rm -rf "$SYSBINS_DIR"
+  ok "Removed $SYSBINS_DIR"
 fi
 
 # Remove LaunchDaemon override
@@ -70,11 +54,8 @@ if [ -f "$BACKUP_DIR/passkit_prefs.bak" ]; then
 else
   log "No backup found — removing our override keys only (keeping other prefs)"
   if command -v plutil >/dev/null 2>&1; then
-    for KEY in PKIsUserPropertyOverrideEnabled PKIsUserPropertyOverrideEnabledKey \
-               PKBypassCertValidation PKBypassStockholmRegionCheck \
-               PKBypassImmoTokenCountCheck \
-               PKDeveloperLoggingEnabled PKDeveloperLogging \
-               PKShowFakeRemoteCredentials PKShowFakeRemoteCredentialsKey \
+    for KEY in PKIsUserPropertyOverrideEnabled PKBypassCertValidation PKBypassStockholmRegionCheck \
+               PKBypassImmoTokenCountCheck PKDeveloperLoggingEnabled PKShowFakeRemoteCredentials \
                PKClientHTTPHeaderHardwarePlatformOverride PKClientHTTPHeaderOSPartOverride; do
       plutil -remove "$KEY" "$PASSKIT_PREFS" 2>/dev/null || true
     done

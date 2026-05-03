@@ -8,5 +8,5 @@ Author: plokijuter
 Section: Tweaks
 Depends: mobilesubstrate (>= 0.9.5000), firmware (>= 15.0)
 Replaces: com.watchpair11.tweak (<< 7.19), com.watchpair11.installer (<< 7.19)
-Conflicts: com.watchpair11.tweak (<< 7.19), com.watchpair11.installer (<< 7.19)
+Conflicts: com.watchpair11.roothide, com.watchpair11.tweak (<< 7.19), com.watchpair11.installer (<< 7.19)
 Provides: com.watchpair11.tweak, com.watchpair11.installer
