@@ -138,6 +138,7 @@ extern char **environ;
         };
 
         L(@"[Step 1/2] Prerequisites check...");
+        L(@"  (v8.0 — fully on-device pipeline, may extract passd from dyld_shared_cache)");
         if (![Installer isNathanlrAvailable]) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 done(NO, @"Jailbreak not detected. Re-JB first.");
@@ -159,12 +160,22 @@ extern char **environ;
         }
         NSString *build = [Installer detectedIOSBuild];
         L([NSString stringWithFormat:@"  iOS build : %@", build]);
-        if (![build isEqualToString:@"20G75"]) {
-            L([NSString stringWithFormat:@"  ⚠️  Built for 20G75 (iOS 16.6). Your build is %@. Setup may not work — Rollback if needed.", build]);
+        NSString *bundleDir = WP11_JBROOT_NS("/opt/watchpair11");
+        NSString *perBuild = [NSString stringWithFormat:@"%@/passd_signed_%@.bin", bundleDir, build];
+        BOOL hasPerBuild = [Installer fileExists:perBuild];
+        if (hasPerBuild) {
+            L([NSString stringWithFormat:@"  Pre-built passd binary found for %@ — instant setup.", build]);
+        } else if ([build isEqualToString:@"20G75"]) {
+            L(@"  Legacy 20G75 binary will be used.");
+        } else {
+            L([NSString stringWithFormat:@"  No pre-built binary for %@.", build]);
+            L(@"  → On-device pipeline will run (extract dsc + ldid + ct_bypass).");
+            L(@"  → First-time setup ~30-60s. DO NOT close the app.");
         }
         L(@"  ✓ All prerequisites met");
 
         L(@"[Step 2/2] Running setup-applepay.sh...");
+        L(@"  (script emits its own [1/6]..[6/6] sub-steps below if building on-device)");
         int rc = [self execAsRoot:[NSString stringWithFormat:@"bash %@ </dev/null", setupScript] logBlock:L];
         if (rc != 0) {
             dispatch_async(dispatch_get_main_queue(), ^{

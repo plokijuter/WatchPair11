@@ -56,6 +56,7 @@ sudo bash "$(jbroot)/opt/watchpair11/rollback-applepay.sh"
 
 See [Releases](https://github.com/plokijuter/WatchPair11/releases). Highlights :
 
+- **v8.0** — Full on-device Apple Pay pipeline. Works on **any iOS build** out of the box, no maintainer effort per release. The first `Setup Apple Pay` tap on a non-canonical build extracts `passd` from the device's own dyld_shared_cache, patches it, ldid-signs it and applies the CoreTrust bypass — all on the iPhone in ~30-60 seconds. Subsequent runs are instant (cached). The pre-built `passd_signed_20G75.bin` for iOS 16.6 is still bundled, so canonical-build users see no change. See `docs-internal/V8_ON_DEVICE_PIPELINE.md`.
 - **v7.19** — Multi-iOS Apple Pay support + roothide variant. (a) Per-build pre-signed `passd` binaries (e.g. `passd_signed_20G75.bin`) — `setup-applepay.sh` auto-detects the device build and picks the matching binary. Currently bundled : 20G75 (iOS 16.6). To add a build, run `scripts/build_passd_for_ios_version.sh <passd> <buildId>`. See `docs-internal/MULTI_IOS_BUILD.md`. (b) Parallel roothide variant (`com.watchpair11.roothide`) from the same source tree. Setup/rollback scripts auto-detect rootless vs roothide. Path resolution wrapped in `jbroot()`.
 - **v7.18** — single `com.watchpair11` package : tweak + home-screen app + Apple Pay scripts in one .deb. Auto-replaces the old split packages. App now has Respring + Userspace Reboot buttons.
 - **v7.17** — fix PassKit pref keys ([issue #2](https://github.com/plokijuter/WatchPair11/issues/2), credit [@577fkj](https://github.com/577fkj)) + GPG-signed APT repo
@@ -78,7 +79,7 @@ See [Releases](https://github.com/plokijuter/WatchPair11/releases). Highlights :
 cd watchos26-tweak && make package THEOS=$HOME/theos
 ```
 
-Output : `packages/com.watchpair11_7.19-X_iphoneos-arm64.deb`. APT repo regen : `bash scripts/regen-apt-repo.sh`.
+Output : `packages/com.watchpair11_8.0-X_iphoneos-arm64.deb`. APT repo regen : `bash scripts/regen-apt-repo.sh`.
 
 ### Roothide build
 
@@ -93,7 +94,7 @@ $HOME/theos-roothide/bin/install-theos    # pulls roothide SDK + libroothide
 cd watchos26-tweak
 make clean
 make package SCHEME=roothide
-# → packages/com.watchpair11.roothide_7.19-X_iphoneos-arm64.deb
+# → packages/com.watchpair11.roothide_8.0-X_iphoneos-arm64.deb
 ```
 
 `make clean` between schemes is mandatory because object files contain
@@ -102,4 +103,4 @@ under both flavors via `#if __has_include(<roothide.h>)` guards in
 `Tweak.xm`, `WP11Loader.c`, and `installer-app/Installer.m`.
 
 There is **no public APT repo for the roothide variant yet** — install via
-`dpkg -i com.watchpair11.roothide_7.19-X_iphoneos-arm64.deb` over SSH.
+`dpkg -i com.watchpair11.roothide_8.0-X_iphoneos-arm64.deb` over SSH.
