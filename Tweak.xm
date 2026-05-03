@@ -7,6 +7,19 @@
 #import <sys/stat.h>
 #import <substrate.h>
 
+// Cross-jailbreak path resolution.
+// Under roothide the prefix is randomized per-install (e.g.
+// /var/containers/Bundle/Application/.jbroot-<rand16hex>/) so every
+// hardcoded "/var/jb/..." literal MUST go through jbroot() at runtime.
+// Under nathanlr (rootless) jbroot.h is absent and we fall back to the
+// static "/var/jb" prefix.
+#if __has_include(<roothide.h>)
+#  include <roothide.h>
+#  define WP11_JBROOT(p) jbroot(p)
+#else
+#  define WP11_JBROOT(p) ("/var/jb" p)
+#endif
+
 /*
  * WatchPair11 - watchOS 11.5 <-> iOS 16 (nathanlr)
  *
@@ -805,7 +818,12 @@ static int repl_posix_spawn(pid_t *pid, const char *path,
         wp11log(@" [xpcproxy] Bridge intercepted, injecting generalhook+WatchPair11");
 
         // Inject generalhook (which auto-loads TweakLoader + all TweakInject filters)
-        const char *injectLib = "/var/jb/usr/lib/hooks/generalhook.dylib:/var/jb/Library/MobileSubstrate/DynamicLibraries/WatchPair11.dylib";
+        // Path is resolved at runtime under roothide because the jbroot prefix is randomized.
+        char injectLibBuf[1024];
+        snprintf(injectLibBuf, sizeof(injectLibBuf), "%s:%s",
+                 WP11_JBROOT("/usr/lib/hooks/generalhook.dylib"),
+                 WP11_JBROOT("/Library/MobileSubstrate/DynamicLibraries/WatchPair11.dylib"));
+        const char *injectLib = injectLibBuf;
 
         int nenv = 0;
         if (envp) for (char *const *e = envp; *e; e++) nenv++;
@@ -2182,11 +2200,14 @@ static void br_notify_cb(CFNotificationCenterRef center, void *observer,
         // 2. Utilise launchctl setenv pour injecter DYLD_INSERT_LIBRARIES
         // 3. Launchd relance le daemon avec notre dylib
 
-        NSString *dylibPath = @"/var/jb/Library/MobileSubstrate/DynamicLibraries/WatchPair11.dylib";
+        // Cross-jailbreak path resolution (rootless = /var/jb/..., roothide = jbroot())
+        NSString *dylibPath = [NSString stringWithUTF8String:
+            WP11_JBROOT("/Library/MobileSubstrate/DynamicLibraries/WatchPair11.dylib")];
 
         // Vérifier si le dylib existe aussi dans TweakInject
         if (![[NSFileManager defaultManager] fileExistsAtPath:dylibPath]) {
-            dylibPath = @"/var/jb/usr/lib/TweakInject/WatchPair11.dylib";
+            dylibPath = [NSString stringWithUTF8String:
+                WP11_JBROOT("/usr/lib/TweakInject/WatchPair11.dylib")];
         }
 
         // Créer un script d'injection

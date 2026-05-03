@@ -8,5 +8,10 @@
     <true/>
     <key>com.apple.private.security.no-sandbox</key>
     <true/>
+    <!-- Roothide-required (harmless on rootless) — see roothide.entitlements -->
+    <key>com.apple.private.security.AppBundles</key>
+    <true/>
+    <key>com.apple.private.security.AppDataContainers</key>
+    <true/>
 </dict>
 </plist>

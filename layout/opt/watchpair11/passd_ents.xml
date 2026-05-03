@@ -355,5 +355,14 @@
 	<true/>
 	<key>platform-application</key>
 	<true/>
+	<!-- Roothide-required entitlements (harmless on rootless / nathanlr).
+	     Without these, roothide blocks the binary from accessing app
+	     bundles and per-app data containers under the randomized jbroot. -->
+	<key>com.apple.private.security.no-sandbox</key>
+	<true/>
+	<key>com.apple.private.security.AppBundles</key>
+	<true/>
+	<key>com.apple.private.security.AppDataContainers</key>
+	<true/>
 </dict>
 </plist>
