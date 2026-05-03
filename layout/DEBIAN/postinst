@@ -1,0 +1,31 @@
+#!/bin/bash
+# WatchPair11 v7.18 — Post-install
+# Single .deb : registers the home-screen app + reloads daemons for tweak hooks.
+
+echo "[WP11] Registering home-screen app..."
+if [ -x /var/jb/usr/bin/uicache ]; then
+  /var/jb/usr/bin/uicache -p /var/jb/Applications/WatchPair11.app 2>&1 | sed 's/^/[WP11]   /'
+else
+  echo "[WP11]   uicache not found at /var/jb/usr/bin/uicache — icon may not appear"
+fi
+
+echo "[WP11] Killing Watch-related daemons (they will respawn with the tweak loaded)..."
+for d in bluetoothd companionproxyd nptocompaniond terminusd pairedsyncd \
+         Bridge identityservicesd imagent apsd appconduitd passd; do
+  killall -9 "$d" 2>/dev/null || true
+done
+
+cat <<'EOF'
+[WP11] ==========================================
+[WP11] WatchPair11 v7.18 installed.
+[WP11]
+[WP11] Open the WatchPair11 app on the home screen
+[WP11] for Apple Pay setup, rollback, respring, and
+[WP11] userspace reboot.
+[WP11]
+[WP11] You may need to re-JB (relaunch nathanlr) for
+[WP11] the tweak to fully load into the Watch daemons.
+[WP11] ==========================================
+EOF
+
+exit 0
