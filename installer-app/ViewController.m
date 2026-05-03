@@ -60,14 +60,15 @@
     stack.alignment = UIStackViewAlignmentFill;
     [self.view addSubview:stack];
 
+    NSString *bundleVer = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"] ?: @"?";
     UILabel *header = [[UILabel alloc] init];
-    header.text = @"watchOS 11.5 ↔ iOS 16";
-    header.font = [UIFont boldSystemFontOfSize:18];
+    header.text = [NSString stringWithFormat:@"WatchPair11 v%@", bundleVer];
+    header.font = [UIFont boldSystemFontOfSize:22];
     header.numberOfLines = 0;
     [stack addArrangedSubview:header];
 
     UILabel *sub = [[UILabel alloc] init];
-    sub.text = @"Pairing + notifs : auto-installed by the package.\nApple Pay : optional, tap below.";
+    sub.text = @"watchOS 11.5 ↔ iOS 16\nPairing + notifs : auto-installed by the package.\nApple Pay : optional, tap below.";
     sub.font = [UIFont systemFontOfSize:13];
     sub.textColor = [UIColor secondaryLabelColor];
     sub.numberOfLines = 0;

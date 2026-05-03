@@ -8,10 +8,10 @@ Conflicts: com.watchpair11.tweak (<< 8.0), com.watchpair11.installer (<< 8.0)
 Replaces: com.watchpair11.tweak (<< 8.0), com.watchpair11.installer (<< 8.0)
 Provides: com.watchpair11.tweak, com.watchpair11.installer
 Filename: debs/com.watchpair11_8.0-2_iphoneos-arm64.deb
-Size: 3462582
-MD5sum: 342526b2bff20e8a3c1ddf1a0de339be
-SHA1: 4fb3fa429be7c91e44b72dc9ff4a60668a70adf9
-SHA256: 06457ed244342da4bae408d68404987286e5c2779f9a687c689a4a0cbb2316d5
+Size: 3463002
+MD5sum: 2ba2802c9e0bff90e6344cbb6b9b33de
+SHA1: 8c45a9a4da7192aa7e424d2b18e50f8cda10384a
+SHA256: dd9855e074194d0615745960ec05ac00df504b928a23aef046113bb5b8aa1eac
 Section: Tweaks
 Description: Pair Apple Watch watchOS 11.5 (Series 10+) with iPhone iOS 16.6. Single .deb works on both nathanlr (rootless) and roothide (Dopamine 2.x) jailbreaks. Includes optional native Apple Pay setup. Home-screen app for one-tap Apple Pay setup + rollback.
 Author: plokijuter
