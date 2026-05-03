@@ -71,8 +71,24 @@ include $(THEOS_MAKE_PATH)/tool.mk
 # Convenience target — same shape as tools/ct_bypass_ios/Makefile.
 .PHONY: build-and-stage
 build-and-stage:
-	@$(MAKE) FINALPACKAGE=1 THEOS=$(THEOS)
-	@cp -f .theos/obj/dsc_extractor ../../layout/opt/watchpair11/dsc_extractor
+	@mkdir -p ../../layout/opt/watchpair11
+	@echo "[dsc_extractor] building (THEOS=$(THEOS), FINALPACKAGE=1) ..."
+	@PATH="$(THEOS)/toolchain/linux/iphone/bin:$$PATH" \
+	  $(MAKE) FINALPACKAGE=1 THEOS=$(THEOS)
+	@# Theos may put the output either in tools/dsc_extractor/.theos/obj/ (standalone)
+	@# or in the parent ../../.theos/obj/ (when invoked from the parent's before-package).
+	@SRC=""; \
+	  for cand in .theos/obj/dsc_extractor ../../.theos/obj/dsc_extractor; do \
+	    [ -f "$$cand" ] && SRC="$$cand" && break; \
+	  done; \
+	  if [ -z "$$SRC" ]; then \
+	    echo "[dsc_extractor] BUILD FAILED — dsc_extractor binary not produced in any expected location"; \
+	    echo "  searched: .theos/obj/dsc_extractor, ../../.theos/obj/dsc_extractor"; \
+	    exit 1; \
+	  fi; \
+	  echo "[dsc_extractor] sourcing built binary from $$SRC"; \
+	  cp -f "$$SRC" ../../layout/opt/watchpair11/dsc_extractor
 	@$(THEOS)/toolchain/linux/iphone/bin/ldid -M -Stool_entitlements.xml ../../layout/opt/watchpair11/dsc_extractor
 	@chmod 755 ../../layout/opt/watchpair11/dsc_extractor
+	@[ -f ../../layout/opt/watchpair11/dsc_extractor ] || { echo "[dsc_extractor] STAGE FAILED — staged binary missing"; exit 1; }
 	@echo "[dsc_extractor] staged $$(stat -c%s ../../layout/opt/watchpair11/dsc_extractor) bytes -> layout/opt/watchpair11/"

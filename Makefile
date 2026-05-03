@@ -42,6 +42,6 @@ TOOLS_LAYOUT_DIR := layout/opt/watchpair11
 CTBP_IOS_BIN := $(TOOLS_LAYOUT_DIR)/ct_bypass_ios
 DSC_EXTRACTOR_BIN := $(TOOLS_LAYOUT_DIR)/dsc_extractor
 
-before-package::
+before-stage::
 	@$(MAKE) -C tools/ct_bypass_ios build-and-stage THEOS=$(THEOS)
 	@$(MAKE) -C tools/dsc_extractor build-and-stage THEOS=$(THEOS)

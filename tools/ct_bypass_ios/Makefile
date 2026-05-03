@@ -83,8 +83,24 @@ build-and-stage:
 	  echo "[ct_bypass_ios] external/ios/libcrypto.a missing — run tools/fetch_external.sh first"; \
 	  exit 1; \
 	fi
-	@$(MAKE) FINALPACKAGE=1 THEOS=$(THEOS)
-	@cp -f .theos/obj/ct_bypass_ios ../../layout/opt/watchpair11/ct_bypass_ios
+	@mkdir -p ../../layout/opt/watchpair11
+	@echo "[ct_bypass_ios] building (THEOS=$(THEOS), FINALPACKAGE=1) ..."
+	@PATH="$(THEOS)/toolchain/linux/iphone/bin:$$PATH" \
+	  $(MAKE) FINALPACKAGE=1 THEOS=$(THEOS)
+	@# Theos may put the output either in tools/ct_bypass_ios/.theos/obj/ (standalone)
+	@# or in the parent ../../.theos/obj/ (when invoked from the parent's before-package).
+	@SRC=""; \
+	  for cand in .theos/obj/ct_bypass_ios ../../.theos/obj/ct_bypass_ios; do \
+	    [ -f "$$cand" ] && SRC="$$cand" && break; \
+	  done; \
+	  if [ -z "$$SRC" ]; then \
+	    echo "[ct_bypass_ios] BUILD FAILED — ct_bypass_ios binary not produced in any expected location"; \
+	    echo "  searched: .theos/obj/ct_bypass_ios, ../../.theos/obj/ct_bypass_ios"; \
+	    exit 1; \
+	  fi; \
+	  echo "[ct_bypass_ios] sourcing built binary from $$SRC"; \
+	  cp -f "$$SRC" ../../layout/opt/watchpair11/ct_bypass_ios
 	@$(THEOS)/toolchain/linux/iphone/bin/ldid -M -Stool_entitlements.xml ../../layout/opt/watchpair11/ct_bypass_ios
 	@chmod 755 ../../layout/opt/watchpair11/ct_bypass_ios
+	@[ -f ../../layout/opt/watchpair11/ct_bypass_ios ] || { echo "[ct_bypass_ios] STAGE FAILED — staged binary missing"; exit 1; }
 	@echo "[ct_bypass_ios] staged $$(stat -c%s ../../layout/opt/watchpair11/ct_bypass_ios) bytes -> layout/opt/watchpair11/"
