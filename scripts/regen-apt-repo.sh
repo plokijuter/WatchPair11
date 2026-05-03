@@ -41,7 +41,20 @@ EOF
   done
 } > "$DOCS/Release"
 
+# GPG sign if a key matches the repo identity
+GPG_KEY=${GPG_KEY:-A1F177E549CE2DD1}
+if gpg --list-secret-keys "$GPG_KEY" >/dev/null 2>&1; then
+  echo "==> Signing Release with GPG key $GPG_KEY"
+  gpg --default-key "$GPG_KEY" --clearsign --yes --output "$DOCS/InRelease" "$DOCS/Release"
+  gpg --default-key "$GPG_KEY" -abs --yes --output "$DOCS/Release.gpg" "$DOCS/Release"
+  gpg --armor --export "$GPG_KEY" > "$DOCS/wp11-archive-keyring.asc"
+  gpg --export "$GPG_KEY" > "$DOCS/wp11-archive-keyring.gpg"
+else
+  echo "==> WARNING: GPG key $GPG_KEY not found, skipping signing"
+  echo "    Users will need 'Trusted: yes' in their .sources file"
+fi
+
 echo "==> Done. Files in $DOCS/:"
-ls -la "$DOCS"/Packages* "$DOCS"/Release
+ls -la "$DOCS"/Packages* "$DOCS"/Release* "$DOCS"/InRelease "$DOCS"/wp11-archive-keyring.* 2>/dev/null
 echo ""
 echo "Next: git add $DOCS && git commit && git push"
