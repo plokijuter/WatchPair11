@@ -32,6 +32,9 @@ backups/
 # (47 MB total, fetched fresh by tools/fetch_external.sh from ChOma upstream)
 /tools/ct_bypass_ios/external/ios/libcrypto.a
 /tools/ct_bypass_ios/external/ios/libssl.a
+# Staged host openssl headers (regenerated at build time by fetch_external.sh
+# or copied manually from /usr/include/openssl/ + the arch-specific one)
+/tools/ct_bypass_ios/external/include/
 # Vendored ChOma source tree (~400 KB, allowed)
 # Theos build artifacts inside tools/
 /tools/*/.theos/

@@ -27,6 +27,25 @@ git clone --depth=1 https://github.com/opa334/ChOma.git "$TMPDIR/ChOma"
 cp -v "$TMPDIR/ChOma/external/ios/libcrypto.a" "$TARGET_DIR/"
 cp -v "$TMPDIR/ChOma/external/ios/libssl.a" "$TARGET_DIR/"
 
+# Stage host OpenSSL headers (used by coretrust_bug.c). The host needs
+# openssl-dev installed (Debian/Ubuntu : `sudo apt install libssl-dev`).
+INC_DIR="$SCRIPT_DIR/ct_bypass_ios/external/include"
+if [ ! -d "$INC_DIR/openssl" ]; then
+  if [ -d /usr/include/openssl ]; then
+    echo "[fetch] Staging host /usr/include/openssl headers..."
+    mkdir -p "$INC_DIR"
+    cp -r /usr/include/openssl "$INC_DIR/openssl"
+    # opensslconf.h + configuration.h live in arch-specific dir on Debian
+    for h in opensslconf.h configuration.h; do
+      ARCH_HDR=$(find /usr/include -name "$h" -path "*openssl*" 2>/dev/null | head -1)
+      [ -n "$ARCH_HDR" ] && cp "$ARCH_HDR" "$INC_DIR/openssl/"
+    done
+  else
+    echo "[fetch] WARN : /usr/include/openssl not found." >&2
+    echo "        Install libssl-dev (apt) or openssl-devel (rpm) and rerun." >&2
+  fi
+fi
+
 echo ""
 echo "[fetch] Done. Now build with :"
 echo "  make -C tools/ct_bypass_ios THEOS=\$HOME/theos"
