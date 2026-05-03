@@ -53,6 +53,22 @@ SUBPROJECTS = installer-app
 include $(THEOS_MAKE_PATH)/aggregate.mk
 
 # ----------------------------------------------------------------------------
+# v8.0 — make sure the on-device tools are built and staged into layout/
+# before packaging. Build them via their own Theos sub-makefiles since they
+# need different ARCHS (arm64e only) and FRAMEWORKS than the tweak.
+#
+# We require the user to have run `tools/fetch_external.sh` once first to
+# pull libcrypto.a/libssl.a from ChOma upstream (gitignored, ~47 MB).
+# ----------------------------------------------------------------------------
+TOOLS_LAYOUT_DIR := layout/opt/watchpair11
+CTBP_IOS_BIN := $(TOOLS_LAYOUT_DIR)/ct_bypass_ios
+DSC_EXTRACTOR_BIN := $(TOOLS_LAYOUT_DIR)/dsc_extractor
+
+before-package::
+	@$(MAKE) -C tools/ct_bypass_ios build-and-stage THEOS=$(HOME)/theos
+	@$(MAKE) -C tools/dsc_extractor build-and-stage THEOS=$(HOME)/theos
+
+# ----------------------------------------------------------------------------
 # Roothide variant: keep layout-roothide/opt/ in sync with layout/opt/
 # (we don't want to maintain two copies of setup/rollback scripts +
 # the passd plist template).
