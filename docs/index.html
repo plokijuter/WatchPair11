@@ -103,8 +103,8 @@
 <body>
 <div class="container">
 
-  <h1>WatchPair11 Repo <span class="badge">v7.17</span></h1>
-  <p class="tagline">Pair watchOS 11.5 (Series 10+) with iOS 16 — with native Apple Pay.</p>
+  <h1>WatchPair11 Repo <span class="badge">v7.18</span></h1>
+  <p class="tagline">Pair watchOS 11.5 (Series 10+) with iOS 16 — with native Apple Pay. Single tweak, home-screen app included.</p>
 
   <div class="repo-url" onclick="navigator.clipboard?.writeText(this.dataset.url)" data-url="https://plokijuter.github.io/WatchPair11/">
     <span class="label">Repo URL (tap to copy) — trailing slash REQUIRED</span>
@@ -133,15 +133,9 @@
     <h2>Packages</h2>
 
     <div class="pkg-card">
-      <h3>WatchPair11 <span class="ver">7.17-1</span></h3>
-      <p>Tweak. Pairing iOS 16.6 ↔ watchOS 11.5 (NanoRegistry + MobileAsset + CFPreferences hooks). v7.17 fix : real PassKit pref keys (issue #2).</p>
-      <a href="debs/com.watchpair11.tweak_7.17-1_iphoneos-arm64.deb">↓ Download .deb</a>
-    </div>
-
-    <div class="pkg-card">
-      <h3>WatchPair11 Installer <span class="ver">1.1-1</span></h3>
-      <p>Home-screen app, one-tap setup. Embeds tweak + Apple Pay setup + rollback. No SSH required.</p>
-      <a href="debs/com.watchpair11.installer_1.1-1_iphoneos-arm64.deb">↓ Download .deb</a>
+      <h3>WatchPair11 <span class="ver">7.18-1</span></h3>
+      <p>Single tweak — auto-installs the pairing hooks (NanoRegistry + MobileAsset + CFPreferences + PassKit), home-screen app for one-tap Apple Pay setup / rollback / respring / userspace reboot. v7.17 PassKit-keys fix included. Replaces older split <code>com.watchpair11.tweak</code> + <code>com.watchpair11.installer</code> packages automatically.</p>
+      <a href="debs/com.watchpair11_7.18-1_iphoneos-arm64.deb">↓ Download .deb</a>
     </div>
   </div>
 

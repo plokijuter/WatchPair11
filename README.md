@@ -53,6 +53,7 @@ sudo bash /var/jb/opt/watchpair11/scripts/rollback-applepay.sh
 
 See [Releases](https://github.com/plokijuter/WatchPair11/releases). Highlights :
 
+- **v7.18** — single `com.watchpair11` package : tweak + home-screen app + Apple Pay scripts in one .deb. Auto-replaces the old split packages. App now has Respring + Userspace Reboot buttons.
 - **v7.17** — fix PassKit pref keys ([issue #2](https://github.com/plokijuter/WatchPair11/issues/2), credit [@577fkj](https://github.com/577fkj)) + GPG-signed APT repo
 - **v7.16** — home-screen installer app, scripts automation
 - **v7.15** — 🏆 Apple Pay Watch provisioning works

@@ -11,9 +11,12 @@ typedef void (^InstallerDoneBlock)(BOOL success, NSString *error);
 + (NSString *)detectedIOSBuild;
 + (BOOL)isNathanlrAvailable;
 
-// Install actions (async, calls log block for each step)
-- (void)installTweakWithLog:(InstallerLogBlock)log done:(InstallerDoneBlock)done;
+// Apple Pay actions (call system scripts at /var/jb/opt/watchpair11/)
 - (void)installApplePayWithLog:(InstallerLogBlock)log done:(InstallerDoneBlock)done;
-- (void)rollbackAllWithLog:(InstallerLogBlock)log done:(InstallerDoneBlock)done;
+- (void)rollbackApplePayWithLog:(InstallerLogBlock)log done:(InstallerDoneBlock)done;
+
+// System actions
+- (void)respringWithLog:(InstallerLogBlock)log done:(InstallerDoneBlock)done;
+- (void)userspaceRebootWithLog:(InstallerLogBlock)log done:(InstallerDoneBlock)done;
 
 @end
