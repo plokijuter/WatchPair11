@@ -1,8 +1,16 @@
 #!/bin/bash
 # WatchPair11 — Apple Pay Setup Script
-# Purpose: Deploy passd SysBins pipeline + PassKit preferences for Apple Pay on watchOS 11.5 + iOS 16
+# Purpose: Deploy passd SysBins pipeline + PassKit preferences for Apple Pay
+#          on watchOS 11.5 + iOS 16/17/18 (multi-iOS, v7.19+)
 # Required: Root (sudo), nathanlr jailbreak, WatchPair11 .deb already installed
-# Tested: iPhone 14 Pro Max iOS 16.6 build 20G75 + Apple Watch Series 10 watchOS 11.5
+# Tested:   iPhone 14 Pro Max iOS 16.6 build 20G75 + Apple Watch Series 10
+#
+# v7.19 — Multi-iOS support : the .deb now ships per-build pre-signed
+#         passd binaries under /var/jb/opt/watchpair11/passd_signed_<BUILD>.bin
+#         (e.g. passd_signed_20G75.bin). This script auto-detects the device
+#         build via `sw_vers -buildVersion` and picks the matching binary.
+#         If only the legacy (suffix-less) `passd_signed` is present, it is
+#         used as a fallback when the device runs build 20G75.
 
 set -e
 
@@ -11,7 +19,6 @@ set -e
 # =============================================================================
 JB_PREFIX="/var/jb"
 BUNDLE_DIR="$JB_PREFIX/opt/watchpair11"
-PASSD_SIGNED="$BUNDLE_DIR/passd_signed"
 PASSD_PLIST="$BUNDLE_DIR/com.apple.passd.plist"
 SYSBINS_DIR="$JB_PREFIX/System/Library/SysBins/PassKitCore.framework"
 LAUNCHD_OVERRIDE="$JB_PREFIX/Library/LaunchDaemons/com.apple.passd.plist"
@@ -33,7 +40,7 @@ warn(){ echo -e "${Y}[WARN]${N} $1"; }
 # =============================================================================
 # SANITY CHECKS
 # =============================================================================
-log "WatchPair11 Apple Pay Setup v7.16"
+log "WatchPair11 Apple Pay Setup v7.19"
 log "======================================"
 echo ""
 
@@ -43,24 +50,70 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-# Check iOS version (fail fast if not 16.6)
+# Detect iOS build
 IOS_VERSION=$(sw_vers -productVersion 2>/dev/null || uname -r)
 BUILD_VERSION=$(sw_vers -buildVersion 2>/dev/null || echo "unknown")
 log "iOS version detected: $IOS_VERSION (build $BUILD_VERSION)"
-if [ "$BUILD_VERSION" != "20G75" ]; then
-  warn "The bundled passd_signed was built for iOS 16.6 build 20G75."
-  warn "Your build is $BUILD_VERSION — hooks may not match exactly."
-  warn "Continue anyway? [y/N]"
-  read -r ANS
-  [ "$ANS" != "y" ] && { err "Aborted by user."; exit 1; }
-fi
 
-# Check nathanlr paths
+# Check nathanlr base path
 [ -d "$JB_PREFIX" ] || { err "Nathanlr jailbreak path $JB_PREFIX not found."; exit 1; }
-[ -f "$PASSD_SIGNED" ] || { err "Pre-signed passd missing: $PASSD_SIGNED"; err "Is WatchPair11 v7.16+ installed?"; exit 1; }
 [ -f "$PASSD_PLIST" ] || { err "Override plist missing: $PASSD_PLIST"; exit 1; }
 
-ok "Sanity checks passed"
+# =============================================================================
+# Locate the right pre-signed passd binary for this build
+# =============================================================================
+# v7.19 layout :
+#   $BUNDLE_DIR/passd_signed_20G75.bin  ← per-build (preferred)
+#   $BUNDLE_DIR/passd_signed_21E236.bin
+#   $BUNDLE_DIR/passd_signed             ← legacy 7.18 path (only used if build = 20G75)
+
+PASSD_SIGNED=""
+PER_BUILD="$BUNDLE_DIR/passd_signed_${BUILD_VERSION}.bin"
+LEGACY="$BUNDLE_DIR/passd_signed"
+
+if [ -f "$PER_BUILD" ]; then
+  PASSD_SIGNED="$PER_BUILD"
+  ok "Found per-build binary for $BUILD_VERSION : $PASSD_SIGNED"
+elif [ -f "$LEGACY" ] && [ "$BUILD_VERSION" = "20G75" ]; then
+  PASSD_SIGNED="$LEGACY"
+  warn "Per-build binary missing — falling back to legacy passd_signed (compatible with 20G75 only)"
+elif [ -f "$LEGACY" ] && [ "$BUILD_VERSION" != "20G75" ]; then
+  err "No matching passd binary for build $BUILD_VERSION."
+  err "The legacy $LEGACY is only safe on iOS 16.6 build 20G75."
+  err ""
+  err "Available pre-built binaries :"
+  for f in "$BUNDLE_DIR"/passd_signed_*.bin; do
+    [ -f "$f" ] || continue
+    err "  - $(basename "$f" .bin | sed 's/^passd_signed_//') ($f)"
+  done
+  err ""
+  err "To add support for build $BUILD_VERSION :"
+  err "  1. Extract passd from your iOS dyld_shared_cache (see docs-internal/MULTI_IOS_BUILD.md)"
+  err "  2. Run: bash scripts/build_passd_for_ios_version.sh <passd> $BUILD_VERSION"
+  err "  3. Reinstall the .deb"
+  err ""
+  err "Or open an issue : https://github.com/plokijuter/WatchPair11/issues"
+  exit 1
+else
+  err "No passd binary found in $BUNDLE_DIR for build $BUILD_VERSION."
+  err ""
+  err "Expected one of :"
+  err "  - $PER_BUILD"
+  err "  - $LEGACY (only valid on 20G75)"
+  err ""
+  err "Available pre-built binaries :"
+  ls -1 "$BUNDLE_DIR"/passd_signed_*.bin 2>/dev/null | sed 's|.*/passd_signed_||; s|\.bin$||; s/^/  - /' || err "  (none)"
+  err ""
+  err "To add support for build $BUILD_VERSION :"
+  err "  1. Extract passd from your iOS dyld_shared_cache (see docs-internal/MULTI_IOS_BUILD.md)"
+  err "  2. Run: bash scripts/build_passd_for_ios_version.sh <passd> $BUILD_VERSION"
+  err "  3. Reinstall the .deb"
+  err ""
+  err "Or open an issue : https://github.com/plokijuter/WatchPair11/issues"
+  exit 1
+fi
+
+ok "Sanity checks passed (using $PASSD_SIGNED)"
 echo ""
 
 # =============================================================================
@@ -100,23 +153,29 @@ ok "LaunchDaemon override installed"
 # STEP 4 : Write PassKit preferences
 # =============================================================================
 log "Step 4/5 — Writing PassKit preferences to $PASSKIT_PREFS"
-# Use the plistbuddy alternative — raw plistlib via python3 would work but iOS may not have it
-# We'll use /var/jb/usr/bin/plutil if available, otherwise write binary plist via perl
 
 PREFS_TEMP="/tmp/wp11_passd_prefs.plist"
+# v7.17 — fix issue #2 (credit @577fkj) : real CFPreferences/NSUserDefaults keys differ from Apple's exported symbol names.
+#   PKIsUserPropertyOverrideEnabled  → PKIsUserPropertyOverrideEnabledKey
+#   PKDeveloperLoggingEnabled        → PKDeveloperLogging
+#   PKShowFakeRemoteCredentials      → PKShowFakeRemoteCredentialsKey
+# Both legacy + correct keys are written (additive) for safety.
 cat > "$PREFS_TEMP" <<'XMLEOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>PKIsUserPropertyOverrideEnabled</key><true/>
+    <key>PKIsUserPropertyOverrideEnabledKey</key><true/>
     <key>PKBypassCertValidation</key><true/>
     <key>PKBypassStockholmRegionCheck</key><true/>
     <key>PKBypassImmoTokenCountCheck</key><true/>
     <key>PKDeveloperLoggingEnabled</key><true/>
+    <key>PKDeveloperLogging</key><true/>
     <key>PKClientHTTPHeaderHardwarePlatformOverride</key><string>iPhone15,3</string>
     <key>PKClientHTTPHeaderOSPartOverride</key><string>iPhone OS 17.0</string>
     <key>PKShowFakeRemoteCredentials</key><true/>
+    <key>PKShowFakeRemoteCredentialsKey</key><true/>
 </dict>
 </plist>
 XMLEOF
@@ -124,8 +183,11 @@ XMLEOF
 # Merge with existing prefs (preserve existing keys)
 if [ -f "$PASSKIT_PREFS" ] && command -v plutil >/dev/null 2>&1; then
   # plutil-based merge (iOS native)
-  for KEY in PKIsUserPropertyOverrideEnabled PKBypassCertValidation PKBypassStockholmRegionCheck \
-             PKBypassImmoTokenCountCheck PKDeveloperLoggingEnabled PKShowFakeRemoteCredentials; do
+  for KEY in PKIsUserPropertyOverrideEnabled PKIsUserPropertyOverrideEnabledKey \
+             PKBypassCertValidation PKBypassStockholmRegionCheck \
+             PKBypassImmoTokenCountCheck \
+             PKDeveloperLoggingEnabled PKDeveloperLogging \
+             PKShowFakeRemoteCredentials PKShowFakeRemoteCredentialsKey; do
     plutil -replace "$KEY" -bool true "$PASSKIT_PREFS" 2>/dev/null || true
   done
   plutil -replace PKClientHTTPHeaderHardwarePlatformOverride -string "iPhone15,3" "$PASSKIT_PREFS" 2>/dev/null || true
@@ -161,7 +223,7 @@ echo ""
 log "======================================"
 log "Setup complete !"
 echo ""
-ok "passd injection is active"
+ok "passd injection is active (binary: $(basename "$PASSD_SIGNED"))"
 ok "PassKit overrides applied"
 echo ""
 warn "IMPORTANT NEXT STEPS :"
@@ -172,7 +234,7 @@ echo "  4. Verify with your bank (SMS, app, etc.)"
 echo "  5. Card should appear verified on Watch"
 echo ""
 warn "IF YOU ENTER SAFE MODE OR THINGS BREAK :"
-echo "  sudo bash /var/jb/opt/watchpair11/scripts/rollback-applepay.sh"
+echo "  sudo bash /var/jb/opt/watchpair11/rollback-applepay.sh"
 echo ""
 log "Logs from passd will be at /var/tmp/wp11.log"
 log "Witness file (confirms hook load) : /var/tmp/wp11_passd.txt"

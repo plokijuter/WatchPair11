@@ -53,6 +53,7 @@ sudo bash /var/jb/opt/watchpair11/scripts/rollback-applepay.sh
 
 See [Releases](https://github.com/plokijuter/WatchPair11/releases). Highlights :
 
+- **v7.19** — Multi-iOS Apple Pay support : ship per-build pre-signed `passd` binaries (e.g. `passd_signed_20G75.bin`). `setup-applepay.sh` auto-detects the device build and picks the matching binary. Currently bundled : 20G75 (iOS 16.6). To add a build, run `scripts/build_passd_for_ios_version.sh <passd> <buildId>`. See `docs-internal/MULTI_IOS_BUILD.md`.
 - **v7.18** — single `com.watchpair11` package : tweak + home-screen app + Apple Pay scripts in one .deb. Auto-replaces the old split packages. App now has Respring + Userspace Reboot buttons.
 - **v7.17** — fix PassKit pref keys ([issue #2](https://github.com/plokijuter/WatchPair11/issues/2), credit [@577fkj](https://github.com/577fkj)) + GPG-signed APT repo
 - **v7.16** — home-screen installer app, scripts automation
