@@ -54,8 +54,11 @@ if [ -f "$BACKUP_DIR/passkit_prefs.bak" ]; then
 else
   log "No backup found — removing our override keys only (keeping other prefs)"
   if command -v plutil >/dev/null 2>&1; then
-    for KEY in PKIsUserPropertyOverrideEnabled PKBypassCertValidation PKBypassStockholmRegionCheck \
-               PKBypassImmoTokenCountCheck PKDeveloperLoggingEnabled PKShowFakeRemoteCredentials \
+    for KEY in PKIsUserPropertyOverrideEnabled PKIsUserPropertyOverrideEnabledKey \
+               PKBypassCertValidation PKBypassStockholmRegionCheck \
+               PKBypassImmoTokenCountCheck \
+               PKDeveloperLoggingEnabled PKDeveloperLogging \
+               PKShowFakeRemoteCredentials PKShowFakeRemoteCredentialsKey \
                PKClientHTTPHeaderHardwarePlatformOverride PKClientHTTPHeaderOSPartOverride; do
       plutil -remove "$KEY" "$PASSKIT_PREFS" 2>/dev/null || true
     done

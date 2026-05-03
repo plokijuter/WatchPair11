@@ -15,7 +15,8 @@ companionmessagesd
 
 # Reference/third-party binaries
 generalhook_original.dylib
-layout/
+# (layout/ ignore removed in v7.19 — multi-iOS pipeline ships per-build passd binaries
+#  in layout/opt/watchpair11/passd_signed_*.bin and they need to be tracked)
 
 # Local environment
 *.log
@@ -23,3 +24,6 @@ layout/
 # Device backups (large tarballs, not source)
 backups/
 /layout/opt/watchpair11/passd_signed
+
+# Allow per-iOS-build pre-signed passd binaries (multi-iOS pipeline, v7.19+)
+!/layout/opt/watchpair11/passd_signed_*.bin
