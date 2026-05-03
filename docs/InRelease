@@ -9,32 +9,32 @@ Codename: WatchPair11
 Architectures: iphoneos-arm64
 Components: main
 Description: Tweak iOS 16.6 + watchOS 11.5 pairing with native Apple Pay support
-Date: Sun, 03 May 2026 15:33:24 UTC
+Date: Sun, 03 May 2026 20:39:04 UTC
 MD5Sum:
- 52573c1cc8f37d54fc0ed63c80583336              944 Packages
- b54d4c653e074cb0ec9b3c5f9e862b02              574 Packages.gz
- c784fec74ebbf1c8258e9ff7d1c49ae5              634 Packages.bz2
+ b3af0ae02e3f141f30ce23e2c30c9680             1888 Packages
+ d708fcab1bf259cc85c6d70a14fc6438              699 Packages.gz
+ bb70f29032c5e844c2b8b19f7eec891e              828 Packages.bz2
 SHA1:
- 95ed65ce28675c3cfb76d5d856f2d7544f7cb1c8              944 Packages
- f1b4ffbc6f560bd1393494c01ff21d7d240e0048              574 Packages.gz
- 0e88b832fcd5f7f89573c19465bcd72b93337def              634 Packages.bz2
+ 5c6ec441e9155941c781ab03c3d341ac96c0ee91             1888 Packages
+ 2f3c2cdc9d4b800c13101f06b1ada5bd948077be              699 Packages.gz
+ 7dbf7275261328e188618b2a8772d8b1a58d1f46              828 Packages.bz2
 SHA256:
- 49be6475d4f33a489d914dd51ac27c01ae6c4a251905dbb6c06b4fc5b66442f7              944 Packages
- 635290001c2227248a0597e9b8b8b4e0a94ba012b4c829001a770aad45b2cef4              574 Packages.gz
- 1920cb5c119d6ae951f328737a71dc4daba74c11237f3dc13a9b74684dfcb015              634 Packages.bz2
+ 62894e82b88f9222d27a08439405bcdfbb2583a948d3f1c5190cb89fd43ef662             1888 Packages
+ 385e8144ee62045cd3a7b0ff8983876da02880665a836b445794274115b6bc3b              699 Packages.gz
+ f0a8ff132e4b131d17513780e51b4e1937aeedfa7b3cf2be10a2427a70f97c51              828 Packages.bz2
 -----BEGIN PGP SIGNATURE-----
 
-iQIzBAEBCgAdFiEEzbfMjJino8n+5jI3ofF35UnOLdEFAmn3asQACgkQofF35UnO
-LdF/hQ/+MYvdFwg3Vp86ZmE5ILiPY7t/spo3MU/ABLUnxYsn9sNRk7fimmq3mOQN
-F0iYIn74wTUV13xEV2UUUI1TrrfUhJqlmL2pyIy1exrf4ZY0eZW9jU18JCUP5NK2
-Dy8ee0x4KckK0ShF4QI9v7SnavVTu4j71IGmnO2HvSAS2NYivOvPwn0702pFOaqS
-OkYjS0a9x0csX+k+r0Yp+sOsAe3dWeR0oZjSQPfjRX5sli4sa82LxsTnSrtxAFmV
-shRmWfkNbcmJQKYvvCM9N7v4JkhGzME+66+tnvfBJF2dLj3BFxGJJT0n6iaSP13e
-I/n4O9X6FZL6Icn7v6rQkl+cG5Z9N5auX3bQ0934crb6hTZ73qcHa38z7qb/swm0
-0uiPc91WqaZ9n/Q8b7wjrs2/vdjzuw+Rn9gzxKk6pZmAlRrtWnP2lQU5QJVd1HSr
-XGGDzcnHT4V7QBT22Fokcoqf3hafmAv4AXn7xBkSm30BcmfuyR4q1s0aQMO7IgdQ
-Bt6Yem9WLIf20S0o/6QwTsfkOD8ZPFFTzZCbQXaDSzd00QbPOfn5e/U8M0TnRyFC
-JIIpBvPo29DNs3pegPwGQ34/tVA9dTsatJIjZtvVVN80oUrFSC+vnBHzuH4cH6tS
-n4sLpVVCmBGTuJgcsohO8BLpMUpn2S+y89qOMDrmDK6py1vs4cI=
-=f50x
+iQIzBAEBCgAdFiEEzbfMjJino8n+5jI3ofF35UnOLdEFAmn3smgACgkQofF35UnO
+LdEpbRAAk19zXZTGkY4HwtyZZmCEoDMyjgnEcA7ri/surjq1BKyIbTt4NzB3eg9w
+3UPTkTM1Ad5IhvjaUH0wd3kOSVg18xLZ+DmGazHzh638/LGBklDkkb0v7QmJqvlp
+ap9jtSQ5uyOR2q8h46on7ZnOC4O66EDm2mQ0mykYh39wxIBBmqZ8HvjgXc2Ll296
+cwhVx4nabxVP3z89DzUoUBlSPhfhf5bWrDp/wJ5YgNq6dSKcBaqnfaH32g/gopYX
+LRTWJnQ19sP14lUWlbLPPrwSZ04gaW6lm2SY9RT6pQ4E3SSzoAcF7Y8BwCc4avoA
+XzSKqar2hGBmLW6cpVvwgPnVi7lkDITGW0JClrFLkUvlLC2pnOhIlT8euRyO93s+
+HCt1a9qrZRZTbyqZ3xvDSN5yBpCsRiZeuVdTcKWHmR6KPP2Je2J2Cx1GPuDC1ZYC
+SHHLMLQjfSAptoERjmxUt2HL0HCM/31K7DYeszwbLMHHaa/9tCiCfnfGGcdtqxD7
+3WBP8h10nzYc35qaz8fiJRp2ptH2xR+mxoS/K9aI411rKfxX9mnWaESCyuCLHOzS
+UN9IjaqQvnPKN/1zLKO2XLN3xkI/+q4QH0ovb6DnHrP9RPODWUsK8qs8eJQcmInu
+AgNz4WgDOywKPbmpj6M1bm8hziKeIgDtOnXATv9x4YufIfwcL9Y=
+=SvkY
 -----END PGP SIGNATURE-----

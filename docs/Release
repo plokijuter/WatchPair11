@@ -6,16 +6,16 @@ Codename: WatchPair11
 Architectures: iphoneos-arm64
 Components: main
 Description: Tweak iOS 16.6 + watchOS 11.5 pairing with native Apple Pay support
-Date: Sun, 03 May 2026 15:33:24 UTC
+Date: Sun, 03 May 2026 20:39:04 UTC
 MD5Sum:
- 52573c1cc8f37d54fc0ed63c80583336              944 Packages
- b54d4c653e074cb0ec9b3c5f9e862b02              574 Packages.gz
- c784fec74ebbf1c8258e9ff7d1c49ae5              634 Packages.bz2
+ b3af0ae02e3f141f30ce23e2c30c9680             1888 Packages
+ d708fcab1bf259cc85c6d70a14fc6438              699 Packages.gz
+ bb70f29032c5e844c2b8b19f7eec891e              828 Packages.bz2
 SHA1:
- 95ed65ce28675c3cfb76d5d856f2d7544f7cb1c8              944 Packages
- f1b4ffbc6f560bd1393494c01ff21d7d240e0048              574 Packages.gz
- 0e88b832fcd5f7f89573c19465bcd72b93337def              634 Packages.bz2
+ 5c6ec441e9155941c781ab03c3d341ac96c0ee91             1888 Packages
+ 2f3c2cdc9d4b800c13101f06b1ada5bd948077be              699 Packages.gz
+ 7dbf7275261328e188618b2a8772d8b1a58d1f46              828 Packages.bz2
 SHA256:
- 49be6475d4f33a489d914dd51ac27c01ae6c4a251905dbb6c06b4fc5b66442f7              944 Packages
- 635290001c2227248a0597e9b8b8b4e0a94ba012b4c829001a770aad45b2cef4              574 Packages.gz
- 1920cb5c119d6ae951f328737a71dc4daba74c11237f3dc13a9b74684dfcb015              634 Packages.bz2
+ 62894e82b88f9222d27a08439405bcdfbb2583a948d3f1c5190cb89fd43ef662             1888 Packages
+ 385e8144ee62045cd3a7b0ff8983876da02880665a836b445794274115b6bc3b              699 Packages.gz
+ f0a8ff132e4b131d17513780e51b4e1937aeedfa7b3cf2be10a2427a70f97c51              828 Packages.bz2
