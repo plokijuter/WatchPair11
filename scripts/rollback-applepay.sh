@@ -4,7 +4,18 @@
 
 set -e
 
-JB_PREFIX="/var/jb"
+# Auto-detect rootless vs roothide (same logic as setup-applepay.sh)
+if command -v jbroot >/dev/null 2>&1; then
+  JB_PREFIX="$(jbroot)"
+  JB_FLAVOR="roothide"
+elif [ -d /var/jb ]; then
+  JB_PREFIX="/var/jb"
+  JB_FLAVOR="rootless"
+else
+  echo "[ERR] Neither roothide (jbroot tool) nor nathanlr (/var/jb) detected." >&2
+  exit 1
+fi
+
 BUNDLE_DIR="$JB_PREFIX/opt/watchpair11"
 BACKUP_DIR="$BUNDLE_DIR/backup"
 SYSBINS_DIR="$JB_PREFIX/System/Library/SysBins/PassKitCore.framework"
@@ -22,6 +33,7 @@ err() { echo -e "${R}[ERR]${N}  $1" >&2; }
 
 log "WatchPair11 Apple Pay Rollback"
 log "==============================="
+log "Jailbreak flavor : $JB_FLAVOR (prefix: $JB_PREFIX)"
 echo ""
 
 if [ "$EUID" -ne 0 ]; then
@@ -29,11 +41,15 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-# Remove passd SysBins injection
-log "Removing passd SysBins"
-if [ -d "$SYSBINS_DIR" ]; then
-  rm -rf "$SYSBINS_DIR"
-  ok "Removed $SYSBINS_DIR"
+# Remove passd SysBins overlay (rootless only)
+if [ "$JB_FLAVOR" = "rootless" ]; then
+  log "Removing passd SysBins overlay"
+  if [ -d "$SYSBINS_DIR" ]; then
+    rm -rf "$SYSBINS_DIR"
+    ok "Removed $SYSBINS_DIR"
+  fi
+else
+  log "Roothide: no SysBins overlay to remove (passd_signed stays in $BUNDLE_DIR)"
 fi
 
 # Remove LaunchDaemon override

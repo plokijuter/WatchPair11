@@ -1,18 +1,30 @@
 #!/bin/bash
 # WatchPair11 — Apple Pay Setup Script
-# Purpose: Deploy passd SysBins pipeline + PassKit preferences for Apple Pay on watchOS 11.5 + iOS 16
-# Required: Root (sudo), nathanlr jailbreak, WatchPair11 .deb already installed
+# Purpose: Deploy passd pipeline + PassKit preferences for Apple Pay on watchOS 11.5 + iOS 16
+# Required: Root (sudo), nathanlr OR roothide jailbreak, WatchPair11 .deb already installed
 # Tested: iPhone 14 Pro Max iOS 16.6 build 20G75 + Apple Watch Series 10 watchOS 11.5
 
 set -e
 
 # =============================================================================
-# CONFIG
+# CONFIG — auto-detect rootless (nathanlr) vs roothide
 # =============================================================================
-JB_PREFIX="/var/jb"
+# Roothide ships a CLI tool `jbroot` which prints the randomized jbroot path.
+# Nathanlr uses the static `/var/jb` prefix.
+if command -v jbroot >/dev/null 2>&1; then
+  JB_PREFIX="$(jbroot)"
+  JB_FLAVOR="roothide"
+elif [ -d /var/jb ]; then
+  JB_PREFIX="/var/jb"
+  JB_FLAVOR="rootless"
+else
+  echo "[ERR] Neither roothide (jbroot tool) nor nathanlr (/var/jb) detected." >&2
+  exit 1
+fi
+
 BUNDLE_DIR="$JB_PREFIX/opt/watchpair11"
 PASSD_SIGNED="$BUNDLE_DIR/passd_signed"
-PASSD_PLIST="$BUNDLE_DIR/com.apple.passd.plist"
+PASSD_PLIST_TEMPLATE="$BUNDLE_DIR/com.apple.passd.plist"
 SYSBINS_DIR="$JB_PREFIX/System/Library/SysBins/PassKitCore.framework"
 LAUNCHD_OVERRIDE="$JB_PREFIX/Library/LaunchDaemons/com.apple.passd.plist"
 BACKUP_DIR="$JB_PREFIX/opt/watchpair11/backup"
@@ -33,8 +45,9 @@ warn(){ echo -e "${Y}[WARN]${N} $1"; }
 # =============================================================================
 # SANITY CHECKS
 # =============================================================================
-log "WatchPair11 Apple Pay Setup v7.17"
+log "WatchPair11 Apple Pay Setup v7.19"
 log "======================================"
+log "Jailbreak flavor : $JB_FLAVOR (prefix: $JB_PREFIX)"
 echo ""
 
 # Must be root
@@ -55,10 +68,10 @@ if [ "$BUILD_VERSION" != "20G75" ]; then
   [ "$ANS" != "y" ] && { err "Aborted by user."; exit 1; }
 fi
 
-# Check nathanlr paths
-[ -d "$JB_PREFIX" ] || { err "Nathanlr jailbreak path $JB_PREFIX not found."; exit 1; }
+# Check JB paths
+[ -d "$JB_PREFIX" ] || { err "Jailbreak prefix $JB_PREFIX not found."; exit 1; }
 [ -f "$PASSD_SIGNED" ] || { err "Pre-signed passd missing: $PASSD_SIGNED"; err "Is WatchPair11 v7.16+ installed?"; exit 1; }
-[ -f "$PASSD_PLIST" ] || { err "Override plist missing: $PASSD_PLIST"; exit 1; }
+[ -f "$PASSD_PLIST_TEMPLATE" ] || { err "Override plist template missing: $PASSD_PLIST_TEMPLATE"; exit 1; }
 
 ok "Sanity checks passed"
 echo ""
@@ -80,28 +93,49 @@ fi
 ok "Backup stored in $BACKUP_DIR"
 
 # =============================================================================
-# STEP 2 : Deploy passd SysBins
+# STEP 2 : Deploy passd binary
+#   - rootless (nathanlr) : SysBins bindfs overlay shadows /System/.../passd
+#   - roothide            : the LaunchDaemon plist Program key points directly
+#                           at $JB_PREFIX/opt/watchpair11/passd_signed (no SysBins)
 # =============================================================================
-log "Step 2/5 — Deploying passd SysBins (signed with TeamID T8ALTGMVXN)"
-mkdir -p "$SYSBINS_DIR"
-cp "$PASSD_SIGNED" "$SYSBINS_DIR/passd"
-chmod 755 "$SYSBINS_DIR/passd"
-ok "passd deployed to $SYSBINS_DIR/passd"
+if [ "$JB_FLAVOR" = "rootless" ]; then
+  log "Step 2/5 — Deploying passd SysBins overlay (signed with TeamID T8ALTGMVXN)"
+  mkdir -p "$SYSBINS_DIR"
+  cp "$PASSD_SIGNED" "$SYSBINS_DIR/passd"
+  chmod 755 "$SYSBINS_DIR/passd"
+  ok "passd deployed to $SYSBINS_DIR/passd"
+else
+  log "Step 2/5 — Roothide: skipping SysBins (no bindfs over /System/), using direct Program path"
+  chmod 755 "$PASSD_SIGNED"
+  ok "passd binary ready at $PASSD_SIGNED"
+fi
 
 # =============================================================================
-# STEP 3 : Deploy override LaunchDaemon plist
+# STEP 3 : Deploy override LaunchDaemon plist (with __JBROOT__ substitution)
 # =============================================================================
 log "Step 3/5 — Installing LaunchDaemon override plist"
 mkdir -p "$(dirname "$LAUNCHD_OVERRIDE")"
-cp "$PASSD_PLIST" "$LAUNCHD_OVERRIDE"
-ok "LaunchDaemon override installed"
+# Substitute __JBROOT__ placeholder with the actual jailbreak prefix.
+sed "s|__JBROOT__|${JB_PREFIX}|g" "$PASSD_PLIST_TEMPLATE" > "$LAUNCHD_OVERRIDE"
+
+# For roothide, also rewrite ProgramArguments to point at our re-signed copy
+# (rootless relies on the SysBins overlay to shadow the real path).
+if [ "$JB_FLAVOR" = "roothide" ]; then
+  if command -v plutil >/dev/null 2>&1; then
+    plutil -replace ProgramArguments -json "[\"$PASSD_SIGNED\"]" "$LAUNCHD_OVERRIDE" 2>/dev/null || \
+      sed -i "s|/System/Library/PrivateFrameworks/PassKitCore.framework/passd|${PASSD_SIGNED}|g" "$LAUNCHD_OVERRIDE"
+  else
+    sed -i "s|/System/Library/PrivateFrameworks/PassKitCore.framework/passd|${PASSD_SIGNED}|g" "$LAUNCHD_OVERRIDE"
+  fi
+fi
+ok "LaunchDaemon override installed at $LAUNCHD_OVERRIDE"
 
 # =============================================================================
 # STEP 4 : Write PassKit preferences
 # =============================================================================
 log "Step 4/5 — Writing PassKit preferences to $PASSKIT_PREFS"
 # Use the plistbuddy alternative — raw plistlib via python3 would work but iOS may not have it
-# We'll use /var/jb/usr/bin/plutil if available, otherwise write binary plist via perl
+# We'll use $JB_PREFIX/usr/bin/plutil if available, otherwise write binary plist via perl
 
 PREFS_TEMP="/tmp/wp11_passd_prefs.plist"
 # v7.17 — fix issue #2 (credit @577fkj) : real CFPreferences/NSUserDefaults keys differ from Apple's exported symbol names.
@@ -177,13 +211,13 @@ ok "PassKit overrides applied"
 echo ""
 warn "IMPORTANT NEXT STEPS :"
 echo "  1. REBOOT your iPhone"
-echo "  2. Re-apply nathanlr jailbreak after reboot"
+echo "  2. Re-apply your jailbreak after reboot"
 echo "  3. Open the Watch app → Wallet & Apple Pay → Add Card"
 echo "  4. Verify with your bank (SMS, app, etc.)"
 echo "  5. Card should appear verified on Watch"
 echo ""
 warn "IF YOU ENTER SAFE MODE OR THINGS BREAK :"
-echo "  sudo bash /var/jb/opt/watchpair11/scripts/rollback-applepay.sh"
+echo "  sudo bash ${BUNDLE_DIR}/rollback-applepay.sh"
 echo ""
 log "Logs from passd will be at /var/tmp/wp11.log"
 log "Witness file (confirms hook load) : /var/tmp/wp11_passd.txt"
