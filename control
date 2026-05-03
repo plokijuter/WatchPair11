@@ -1,6 +1,6 @@
 Package: com.watchpair11
 Name: WatchPair11
-Version: 8.0-3
+Version: 8.1-1
 Architecture: iphoneos-arm64
 Description: Pair Apple Watch watchOS 11.5 (Series 10+) with iPhone iOS 16.6. Single .deb works on both nathanlr (rootless) and roothide (Dopamine 2.x) jailbreaks. Includes optional native Apple Pay setup. Home-screen app for one-tap Apple Pay setup + rollback.
 Maintainer: plokijuter

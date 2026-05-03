@@ -51,6 +51,7 @@
 extern void CFPreferencesSetValue(CFStringRef key, CFPropertyListRef value,
                                   CFStringRef appID, CFStringRef user, CFStringRef host);
 extern Boolean CFPreferencesSynchronize(CFStringRef appID, CFStringRef user, CFStringRef host);
+extern CFPropertyListRef CFPreferencesCopyAppValue(CFStringRef key, CFStringRef appID);
 
 // =====================================================================
 // LOGGING dans /var/mobile/Library/Preferences/wp11.log
@@ -1603,6 +1604,138 @@ static NSString *snapshotDevice(id self) {
 }
 
 static int s_btTraceCount = 0;
+
+// =====================================================================
+// v8.1 — Watch-battery anti-retry-storm experiment
+//
+// PROBLEM: v8.0 BLOCKs setNearbyActionV2Type:0x00 to prevent device-class
+// corruption (saved iPhone-side battery). Side effect: iPhone never feeds
+// the parsed nearby-action through its WiProx context refresh, so the
+// outgoing CBAdvertiserDaemon payload stays stale. The Watch never sees
+// the implicit ack adv it expects → it retry-storms (~250 advs/sec, drains
+// Watch battery fast).
+//
+// EXPERIMENT (gated by `defaults read com.apple.bluetoothd WP11AckExperiment`):
+// when we BLOCK a 0x00 setter call, also coalesce-trigger CBAdvertiserDaemon's
+// _updateNearbyActionV2Payload: (and _wiProxUpdateAdvertising:) so the iPhone
+// refreshes its outgoing adv. This gives the Watch the implicit "I heard you"
+// signal and (hopefully) calms the retry storm.
+//
+// Coalesced to once per ~250 ms to avoid flooding the advertiser ourselves.
+// Default: OFF. Enable with:
+//   defaults write com.apple.bluetoothd WP11AckExperiment YES
+//   killall -9 bluetoothd
+// =====================================================================
+static BOOL s_ackExpEnabled = NO;
+static BOOL s_ackExpChecked = NO;
+static NSTimeInterval s_lastAckRefresh = 0;
+static int s_ackBlockedCount = 0;
+static int s_ackRefreshFired = 0;
+
+static BOOL ackExperimentEnabled(void) {
+    if (s_ackExpChecked) return s_ackExpEnabled;
+    s_ackExpChecked = YES;
+    @try {
+        // Read /var/mobile/Library/Preferences/com.apple.bluetoothd.plist
+        // (CFPreferencesCopyAppValue is the cheapest path inside bluetoothd.)
+        CFPropertyListRef v = CFPreferencesCopyAppValue(
+            CFSTR("WP11AckExperiment"),
+            CFSTR("com.apple.bluetoothd"));
+        if (v) {
+            if (CFGetTypeID(v) == CFBooleanGetTypeID()) {
+                s_ackExpEnabled = CFBooleanGetValue((CFBooleanRef)v);
+            } else if (CFGetTypeID(v) == CFNumberGetTypeID()) {
+                int n = 0;
+                CFNumberGetValue((CFNumberRef)v, kCFNumberIntType, &n);
+                s_ackExpEnabled = (n != 0);
+            } else if (CFGetTypeID(v) == CFStringGetTypeID()) {
+                NSString *s = (__bridge NSString *)v;
+                s_ackExpEnabled = ([s caseInsensitiveCompare:@"YES"] == NSOrderedSame ||
+                                   [s caseInsensitiveCompare:@"true"] == NSOrderedSame ||
+                                   [s isEqualToString:@"1"]);
+            }
+            CFRelease(v);
+        }
+        // Env var override (handy for `launchctl setenv`).
+        const char *env = getenv("WP11_ACK_EXPERIMENT");
+        if (env && (env[0] == '1' || env[0] == 'y' || env[0] == 'Y')) {
+            s_ackExpEnabled = YES;
+        }
+    } @catch (NSException *e) {}
+    wp11log(@"[BLE-ACK] WP11AckExperiment = %@", s_ackExpEnabled ? @"ON" : @"OFF");
+    return s_ackExpEnabled;
+}
+
+// Find the live CBAdvertiserDaemon singleton at runtime. CBAdvertiserDaemon
+// has a +sharedAdvertiser/+sharedInstance/+sharedDaemon class method on
+// most iOS builds; we probe the common selectors and cache the result.
+static id s_cachedAdvDaemon = nil;
+static id resolveAdvertiserDaemon(void) {
+    if (s_cachedAdvDaemon) return s_cachedAdvDaemon;
+    Class cls = NSClassFromString(@"CBAdvertiserDaemon");
+    if (!cls) return nil;
+    NSArray *cands = @[@"sharedAdvertiser", @"sharedInstance", @"sharedDaemon",
+                       @"defaultAdvertiser", @"shared"];
+    for (NSString *selName in cands) {
+        SEL s = NSSelectorFromString(selName);
+        if ([cls respondsToSelector:s]) {
+            @try {
+                id obj = ((id(*)(id, SEL))objc_msgSend)(cls, s);
+                if (obj) {
+                    s_cachedAdvDaemon = obj;
+                    wp11log(@"[BLE-ACK] resolved CBAdvertiserDaemon via +%@ -> %p",
+                            selName, (__bridge void *)obj);
+                    return obj;
+                }
+            } @catch (NSException *e) {}
+        }
+    }
+    wp11log(@"[BLE-ACK] could NOT resolve CBAdvertiserDaemon singleton");
+    return nil;
+}
+
+// Trigger the iPhone's own NearbyAction V2 payload refresh + WiProx push.
+// Coalesced to ~once per 250 ms so we never out-spam the Watch.
+static void triggerOutgoingAckRefresh(void) {
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    if (now - s_lastAckRefresh < 0.25) return;
+    s_lastAckRefresh = now;
+
+    id advd = resolveAdvertiserDaemon();
+    if (!advd) return;
+
+    // _updateNearbyActionV2Payload: takes one arg (commonly an NSDictionary
+    // change-context, often nil works because the impl re-reads its iVars).
+    SEL updSel = NSSelectorFromString(@"_updateNearbyActionV2Payload:");
+    if ([advd respondsToSelector:updSel]) {
+        @try {
+            ((void(*)(id, SEL, id))objc_msgSend)(advd, updSel, nil);
+            s_ackRefreshFired++;
+            if (s_ackRefreshFired <= 5 || (s_ackRefreshFired % 50) == 0) {
+                wp11log(@"[BLE-ACK] fired _updateNearbyActionV2Payload: (#%d)",
+                        s_ackRefreshFired);
+            }
+        } @catch (NSException *e) {
+            wp11log(@"[BLE-ACK] _updateNearbyActionV2Payload: threw %@", e);
+        }
+    } else {
+        // Fallback: kick the WiProx update directly.
+        SEL wpUpd = NSSelectorFromString(@"_wiProxUpdateAdvertising:");
+        if ([advd respondsToSelector:wpUpd]) {
+            @try {
+                ((void(*)(id, SEL, id))objc_msgSend)(advd, wpUpd, nil);
+                s_ackRefreshFired++;
+                if (s_ackRefreshFired <= 5) {
+                    wp11log(@"[BLE-ACK] fired _wiProxUpdateAdvertising: (#%d)",
+                            s_ackRefreshFired);
+                }
+            } @catch (NSException *e) {
+                wp11log(@"[BLE-ACK] _wiProxUpdateAdvertising: threw %@", e);
+            }
+        }
+    }
+}
+
 static void hooked_setNearbyActionV2Type(id self, SEL _cmd, uint8_t type) {
     if (shouldLog()) {
         wp11log(@"[BLE] setNearbyActionV2Type: 0x%02x SNAP[%@]", type, snapshotDevice(self));
@@ -1622,6 +1755,16 @@ static void hooked_setNearbyActionV2Type(id self, SEL _cmd, uint8_t type) {
     if (type == 0x00) {
         if (s_btTraceCount <= 3) {
             wp11log(@"[BLE] BLOCKED setNearbyActionV2Type:0x00 (would set unknown)");
+        }
+        // v8.1 EXPERIMENT: ack the Watch by refreshing iPhone's own outgoing
+        // adv payload. Gated by WP11AckExperiment pref. Coalesced @ 250ms.
+        s_ackBlockedCount++;
+        if (ackExperimentEnabled()) {
+            triggerOutgoingAckRefresh();
+            if ((s_ackBlockedCount % 500) == 1) {
+                wp11log(@"[BLE-ACK] block#%d -> refresh#%d (rate-limited)",
+                        s_ackBlockedCount, s_ackRefreshFired);
+            }
         }
         return;  // skip the original setter — don't overwrite with 0x00
     }
