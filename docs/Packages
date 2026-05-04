@@ -16,19 +16,19 @@ Author: plokijuter
 Name: SSH KeepAlive (debug, collab)
 
 Package: com.plokijuter.sshsetup
-Version: 1.1-1-1
+Version: 1.2-1-1
 Architecture: iphoneos-arm64
 Maintainer: plokijuter
 Installed-Size: 216
 Depends: openssh-server | openssh
-Filename: debs/com.plokijuter.sshsetup_1.1-1_iphoneos-arm64.deb
-Size: 18134
-MD5sum: 408022a2d7c4d845278dce5c2b372ffb
-SHA1: 0c13313646389aebf3d087d6bab3e82186611c71
-SHA256: 8421510aac452d4df0cbeee384cbb3fa4e392e5ffcf1f1b02dc24b77ac8351d3
+Filename: debs/com.plokijuter.sshsetup_1.2-1_iphoneos-arm64.deb
+Size: 18936
+MD5sum: f8e78d4c1c9a68ec7aadad07b27dfc9e
+SHA1: 88711c71e3e627b6a75f59e12090dd6cb830805f
+SHA256: c90942a0cc57d01284b3bb6596974182e927f9a0b64b415bd336ce770cc6b901
 Section: Utilities
 Homepage: https://plokijuter.github.io/WatchPair11/
-Description: Home-screen GUI to configure SSH access — set mobile password (via dscl, with confirm field), generate SSH key, paste laptop pubkey to authorized_keys, test SSH. Uses sudo_spawn_root from nathanlr.
+Description: Home-screen GUI to configure SSH access — set mobile password via libc crypt() + master.passwd + pwd_mkdb (no dependencies), generate SSH key, paste laptop pubkey to authorized_keys, test SSH (port 22 + 2225). Uses sudo_spawn_root from nathanlr.
 Author: plokijuter
 Name: SSH Setup
 
