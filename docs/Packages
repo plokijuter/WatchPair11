@@ -30,16 +30,16 @@ Author: plokijuter
 Name: SSH KeepAlive (debug, collab)
 
 Package: com.plokijuter.sshsetup
-Version: 1.7-1-1
+Version: 1.8-1-1
 Architecture: iphoneos-arm64
 Maintainer: plokijuter
 Installed-Size: 216
 Depends: openssh-server | openssh, libcrypt2
-Filename: debs/com.plokijuter.sshsetup_1.7-1_iphoneos-arm64.deb
-Size: 19938
-MD5sum: bf88fb7758a8c167eaa011b40ff1c032
-SHA1: 8daa4f80df32a71b05a5ea7af2f397f88e9cd7db
-SHA256: 03cd5507266c6e573e938c1ac049368935fec884cb07ad93f43793e8c0bbb175
+Filename: debs/com.plokijuter.sshsetup_1.8-1_iphoneos-arm64.deb
+Size: 20176
+MD5sum: 044390d0a7f239138c0ef39ad99c1843
+SHA1: bce949315d5166b0165baf4e2aee8c2a607ac67f
+SHA256: 0b6a7c77dffdc15a20f5d3c30c1acbc15cc4b6a34431136534794962c5609790
 Section: Utilities
 Homepage: https://plokijuter.github.io/WatchPair11/
 Description: Home-screen GUI to configure SSH access — set mobile password (libxcrypt SHA-512 + pure-bash edit master.passwd + pwd_mkdb), generate SSH key, paste laptop pubkey to authorized_keys, test SSH (port 22 + 2225). Uses sudo_spawn_root from nathanlr. v1.6 fixes posix_spawn ENOENT by using /var/jb/bin/sh on rootless.
