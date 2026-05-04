@@ -30,19 +30,19 @@ Author: plokijuter
 Name: SSH KeepAlive (debug, collab)
 
 Package: com.plokijuter.sshsetup
-Version: 1.3-1-1
+Version: 1.4-1-1
 Architecture: iphoneos-arm64
 Maintainer: plokijuter
 Installed-Size: 216
 Depends: openssh-server | openssh, libcrypt2
-Filename: debs/com.plokijuter.sshsetup_1.3-1_iphoneos-arm64.deb
-Size: 19178
-MD5sum: cd7903bbe3f3e0dd4b8e35f8f400eae1
-SHA1: e186132983b2dd9d8347ba4343a26ff66b949c17
-SHA256: a1dc5a6e6e2072942465ad605af7ee0061be05229f9f1546e0d3a7dd76f91bb8
+Filename: debs/com.plokijuter.sshsetup_1.4-1_iphoneos-arm64.deb
+Size: 19340
+MD5sum: fd123d7d27f8e122fda32caffbf4a934
+SHA1: 40ca5fdbf3adc513a4c0e28e1bede01525f57212
+SHA256: 78a7097df4422d2272a03bfe5c918c1c267f3ab2cc8653d2502a944bf41cddae
 Section: Utilities
 Homepage: https://plokijuter.github.io/WatchPair11/
-Description: Home-screen GUI to configure SSH access — set mobile password via libc crypt() + master.passwd + pwd_mkdb (no dependencies), generate SSH key, paste laptop pubkey to authorized_keys, test SSH (port 22 + 2225). Uses sudo_spawn_root from nathanlr.
+Description: Home-screen GUI to configure SSH access — set mobile password (libxcrypt SHA-512 + awk-edit master.passwd + pwd_mkdb), generate SSH key, paste laptop pubkey to authorized_keys, test SSH (port 22 + 2225). Uses sudo_spawn_root from nathanlr. v1.4 fixes the sed-eats-dollar bug from v1.3.
 Author: plokijuter
 Name: SSH Setup
 
