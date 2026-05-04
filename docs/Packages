@@ -52,3 +52,31 @@ Description: Pair Apple Watch watchOS 11.5 (Series 10+) with iPhone iOS 16.6. Si
 Author: plokijuter
 Name: WatchPair11
 
+Package: openssh-server
+Version: 9.7p1-1plokijuter1
+Architecture: iphoneos-arm64
+Maintainer: plokijuter (procursus fork for nathanlr rootless)
+Installed-Size: 1452
+Depends: libiosexec1 (>= 1.3.1), libssl3, openssh-client (= 9.7p1-1), openssh-sftp-server, libcrypt2, libpam2, libmd0
+Conflicts: com.midnightchips.localhostssh, openssh (<< 1:0)
+Replaces: openssh (<< 1:0), openssh-server (<< 9.7p1-1plokijuter1)
+Filename: debs/openssh-server_9.7p1-1plokijuter1_iphoneos-arm64.deb
+Size: 325068
+MD5sum: 33393b4da0eb98c80aa8916bf6b22255
+SHA1: e1858850babee0a9aaa350e3ffe7149ca93ed0e0
+SHA256: 736c65bf6c939a9ae9b02fdbec9c8d21e4ca930a64ba4a8dff1d2c8fa1e021c2
+Section: Networking
+Priority: important
+Description: secure shell (SSH) server (rootless-fixed plist for nathanlr)
+ Same binaries/configs as procursus 9.7p1-1, with the LaunchDaemon plist
+ patched to work properly in nathanlr/Dopamine rootless mode:
+ .
+   - Removes inetd-mode (which spawns dying single-shot sshd via xpcproxy)
+   - Adds UserName=root + RunAtLoad + KeepAlive (true daemon mode)
+   - Adds DYLD_INSERT_LIBRARIES="" to bypass tweak injection that crashes
+     sshd privsep children at kex
+   - Logs to /var/log/sshd.log instead of /dev/null for diagnostics
+ .
+ The procursus inetd plist works in rootful but fails in user/501 domain
+ because privsep children can't access com.apple.system.logger XPC.
+
