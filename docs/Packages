@@ -1,16 +1,17 @@
 Package: com.plokijuter.sshd-keepalive
-Version: 1.2-1
+Version: 1.3-1
 Architecture: iphoneos-arm64
 Maintainer: plokijuter
 Depends: openssh-server | openssh
-Filename: debs/com.plokijuter.sshd-keepalive_1.2-1_iphoneos-arm64.deb
-Size: 2886
-MD5sum: 39d4c6b736be712c757cb3323c379ce3
-SHA1: 586ce61cba4183f6cd1356fec772ede9e761b63d
-SHA256: e5c37d7d5ba856c8bf539e8e85a21bb33ecf7a4520c25388090ebcf1b0d9648a
+Recommends: com.plokijuter.sshsetup
+Filename: debs/com.plokijuter.sshd-keepalive_1.3-1_iphoneos-arm64.deb
+Size: 2748
+MD5sum: 558ee4475a52a324e937a2d516447a23
+SHA1: 77ea2029b54fe5c749ed65d8877c3737f48a8ee0
+SHA256: 4bd56fbf043c03819ae1303ae1d42773342d9c7feaae10994ab848c9cdbf33fd
 Section: Networking
 Homepage: https://plokijuter.github.io/WatchPair11/
-Description: Stable OpenSSH on port 2225, bypasses tweak DYLD injection (which crashes privsep children at kex), KeepAlive + watchdog (30s health check), debug log /var/log/sshd-ka.log. Auto-installs host pubkey for mobile user. ProcessType=Interactive for max jetsam headroom (15MB). Independent from procursus inetd sshd.
+Description: Stable OpenSSH on port 2225, bypasses tweak DYLD injection (which crashes privsep children at kex), KeepAlive + watchdog (30s health check), debug log /var/log/sshd-ka.log. ProcessType=Interactive for max jetsam headroom (15MB). Independent from procursus inetd sshd. Use the 'SSH Setup' app to configure password/pubkey auth.
 Author: plokijuter
 Name: SSH KeepAlive (debug)
 
