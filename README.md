@@ -40,11 +40,20 @@ Or grab the `.deb` from the [latest release](https://github.com/plokijuter/Watch
 - nathanlr **or** roothide Dopamine 2.x jailbreak active
 - Sileo (or Zebra / Cydia)
 
+Tested only on iPhone 14 Pro Max + iOS 16.6 (20G75) + nathanlr. **iOS 17 is not supported**, even though nathanlr runs on 17.0 (safe mode reported on 17.0 in [#3](https://github.com/plokijuter/WatchPair11/issues/3)). roothide support is untested.
+
+## If safe mode hits right after installing
+
+Safe mode at respring means the tweak crashed SpringBoard; the Apple Pay rollback script does not fix that. In safe mode tweaks are not loaded, so:
+
+1. Open Sileo (or Zebra) → Installed → **WatchPair11** → Remove, then respring.
+2. Please open an issue with the SpringBoard crash log: Settings → Privacy & Security → Analytics & Improvements → Analytics Data → latest `SpringBoard-….ips`. Include your iOS build, jailbreak and ElleKit versions.
+
 ## Apple Pay setup
 
 After installing the tweak, the easiest path is the **WatchPair11 Installer** app (one-tap setup, also from the repo). Or use the SSH scripts at `<jbroot>/opt/watchpair11/{setup,rollback}-applepay.sh`.
 
-If safe mode hits :
+If safe mode hits after running **Setup Apple Pay** (the tweak itself was working before), roll back the Apple Pay part :
 ```bash
 # nathanlr
 sudo bash /var/jb/opt/watchpair11/rollback-applepay.sh

@@ -1,5 +1,5 @@
 #!/bin/bash
-# WatchPair11 v7.19 — Post-install (rootless / nathanlr variant)
+# WatchPair11 — Post-install (rootless / nathanlr variant)
 # Single .deb : registers the home-screen app + reloads daemons for tweak hooks.
 
 set -e
@@ -28,7 +28,7 @@ done
 
 cat <<'EOF'
 [WP11] ==========================================
-[WP11] WatchPair11 v7.19 installed.
+[WP11] WatchPair11 installed.
 [WP11]
 [WP11] Open the WatchPair11 app on the home screen
 [WP11] for Apple Pay setup, rollback, respring, and
