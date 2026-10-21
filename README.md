@@ -44,6 +44,8 @@ Tested only on iPhone 14 Pro Max + iOS 16.6 (20G75) + nathanlr. **iOS 17 is not 
 
 ## If safe mode hits right after installing
 
+**First, make sure you are on 8.0-4 or later.** 8.0-3 and earlier went into safe mode whenever ElleKit loaded the tweak. The cause was an old-ABI arm64e slice in the dylib, and 8.0-4 ships it arm64-only.
+
 Safe mode at respring means the tweak crashed SpringBoard; the Apple Pay rollback script does not fix that. In safe mode tweaks are not loaded, so:
 
 1. Open Sileo (or Zebra) → Installed → **WatchPair11** → Remove, then respring.
