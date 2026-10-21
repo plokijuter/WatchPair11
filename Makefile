@@ -16,7 +16,14 @@ export THEOS ?= $(HOME)/theos
 THEOS_PACKAGE_SCHEME = rootless
 
 INSTALL_TARGET_PROCESSES = SpringBoard
-ARCHS = arm64 arm64e
+# arm64 ONLY for the tweak dylib. The Linux toolchain (L1ghtmann clang 11) can
+# only emit the OLD arm64e ABI; on iOS 15+ dyld prefers that slice in arm64e
+# processes and the %ctor dies on its first constant NSString (SIGBUS "Address
+# size fault" in objc_msgSend) -> SpringBoard + bluetoothd crash -> safe mode.
+# Seen 2026-10-21 under ElleKit's libinjector. Without an arm64e slice dyld
+# loads the arm64 one, which works (same fix as opa334/SliceFixup).
+# Do NOT add arm64e back unless the toolchain emits the new ABI.
+ARCHS = arm64
 
 include $(THEOS)/makefiles/common.mk
 
